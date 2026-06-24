@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ATTENDEE
+  ORGANIZER
+  ADMIN
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  ENDED
+  CANCELLED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  REFUNDED
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  role         UserRole @default(ATTENDEE)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  organization  Organization?
+  bookings      Booking[]
+  refreshTokens RefreshToken[]
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([token])
+  @@index([userId])
+}
+
+model Organization {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  description String?
+  logoUrl     String?
+  ownerId     String   @unique
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  events Event[]
+
+  @@index([slug])
+}
+
+model Event {
+  id             String       @id @default(uuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  slug           String       @unique
+  description    String
+  venue          String
+  bannerUrl      String?
+  capacity       Int
+  status         EventStatus  @default(DRAFT)
+  startsAt       DateTime
+  endsAt         DateTime
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  ticketTypes TicketType[]
+
+  @@index([slug])
+  @@index([organizationId])
+  @@index([status])
+  @@index([startsAt])
+}
+
+model TicketType {
+  id            String    @id @default(uuid())
+  eventId       String
+  event         Event     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name          String
+  description   String?
+  price         Int       // in paise — 10000 = ₹100
+  totalQuantity Int
+  soldQuantity  Int       @default(0)
+  saleStartsAt  DateTime?
+  saleEndsAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  bookings Booking[]
+
+  @@index([eventId])
+}
+
+model Booking {
+  id              String        @id @default(uuid())
+  userId          String
+  user            User          @relation(fields: [userId], references: [id])
+  ticketTypeId    String
+  ticketType      TicketType    @relation(fields: [ticketTypeId], references: [id])
+  status          BookingStatus @default(PENDING)
+  qrCode          String        @unique
+  quantity        Int           @default(1)
+  totalAmount     Int           // in paise
+  paymentId       String?
+  razorpayOrderId String?       @unique
+  checkedIn       Boolean       @default(false)
+  checkedInAt     DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([userId])
+  @@index([ticketTypeId])
+  @@index([qrCode])
+  @@index([razorpayOrderId])
+  @@index([status])
+}
