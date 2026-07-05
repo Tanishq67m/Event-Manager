@@ -145,6 +145,12 @@ async function request<T>(
   const json = await res.json();
 
   if (!res.ok) {
+    if (res.status === 401) {
+      clearTokens();
+      if (typeof window !== "undefined") {
+        window.location.href = "/auth/login?expired=true";
+      }
+    }
     throw new ApiError(res.status, json.error || "Something went wrong");
   }
 

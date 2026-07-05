@@ -34,28 +34,30 @@ function RegisterForm() {
   }
 
   return (
-    <div className="min-h-[calc(100vh-56px)] flex items-center justify-center px-4 bg-gray-50">
-      <div className="w-full max-w-sm">
-        <div className="ep-card p-8">
-          <div className="mb-8 text-center">
+    <div className="min-h-[calc(100vh-56px)] flex items-center justify-center px-4 bg-[#08070d] bg-radial-pulse relative overflow-hidden">
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-64 bg-violet-600/10 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="w-full max-w-sm z-10 relative">
+        <div className="glass-card p-8 rounded-xl shadow-2xl border border-white/10">
+          <div className="mb-6 text-center">
             <div className="flex justify-center mb-4">
-              <span className="h-2.5 w-2.5 rounded-full bg-[#1A56A4]" />
+              <span className="h-3 w-3 rounded-full bg-violet-500 shadow-[0_0_8px_rgba(124,58,237,0.8)]" />
             </div>
-            <h1 className="text-xl font-semibold text-gray-900">Create your account</h1>
-            <p className="text-sm text-gray-500 mt-1">Start managing events for free</p>
+            <h1 className="text-2xl font-bold text-white tracking-tight">Create account</h1>
+            <p className="text-xs text-gray-400 mt-1.5 font-medium">Start hosting and booking events</p>
           </div>
 
           {/* Role toggle */}
-          <div className="flex rounded-lg border border-gray-200 p-1 mb-6 bg-gray-50">
+          <div className="flex rounded-lg border border-white/10 p-1 mb-6 bg-slate-950/40">
             {["ATTENDEE", "ORGANIZER"].map((r) => (
               <button
                 key={r}
                 type="button"
                 onClick={() => setRole(r)}
-                className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-all ${
+                className={`flex-1 rounded-md py-2 text-xs font-semibold transition-all cursor-pointer ${
                   role === r
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
+                    ? "bg-violet-600 text-white shadow-md border border-violet-500/20"
+                    : "text-gray-400 hover:text-white"
                 }`}
               >
                 {r === "ATTENDEE" ? "I'm attending" : "I'm organizing"}
@@ -92,7 +94,7 @@ function RegisterForm() {
               <input
                 type="password"
                 className="ep-input"
-                placeholder="At least 8 chars, one uppercase, one number"
+                placeholder="At least 8 characters"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -100,17 +102,23 @@ function RegisterForm() {
             </div>
 
             {error && (
-              <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
+              <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-lg px-3.5 py-2.5">
+                {error}
+              </p>
             )}
 
-            <button type="submit" className="ep-btn-primary w-full py-2.5 mt-1" disabled={loading}>
+            <button
+              type="submit"
+              className="ep-btn-primary w-full py-3 mt-1 shadow-[0_0_15px_rgba(124,58,237,0.35)] glow-btn-hover"
+              disabled={loading}
+            >
               {loading ? "Creating account…" : "Create account"}
             </button>
           </form>
 
-          <p className="text-center text-sm text-gray-500 mt-6">
+          <p className="text-center text-xs text-gray-400 mt-6 font-medium">
             Already have an account?{" "}
-            <Link href="/auth/login" className="text-[#1A56A4] font-medium hover:underline">
+            <Link href="/auth/login" className="text-violet-400 font-bold hover:underline ml-1">
               Sign in
             </Link>
           </p>

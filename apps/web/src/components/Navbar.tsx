@@ -15,53 +15,70 @@ export default function Navbar() {
     <Link
       href={href}
       className={cn(
-        "text-sm transition-colors",
+        "text-xs font-bold uppercase tracking-wider transition-all duration-150 relative py-2 px-1",
         pathname === href
-          ? "text-[#1A56A4] font-medium"
-          : "text-gray-500 hover:text-gray-900"
+          ? "text-violet-400"
+          : "text-gray-400 hover:text-white"
       )}
     >
       {label}
+      {pathname === href && (
+        <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full shadow-[0_0_8px_rgba(124,58,237,0.8)]" />
+      )}
     </Link>
   );
 
   return (
-    <header className="sticky top-0 z-50 border-b border-gray-100 bg-white/90 backdrop-blur-sm">
+    <header className="sticky top-0 z-50 border-b border-white/5 bg-slate-950/70 backdrop-blur-lg">
       <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <div className="flex h-14 items-center justify-between">
+        <div className="flex h-16 items-center justify-between">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-[#1A56A4]" />
-            <span className="font-semibold text-gray-900 text-sm tracking-tight">EventPulse</span>
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <span className="h-3 w-3 rounded-full bg-gradient-to-tr from-violet-500 to-fuchsia-500 shadow-[0_0_12px_rgba(124,58,237,0.8)] group-hover:scale-110 transition-transform duration-300" />
+            <span className="font-black text-white text-base tracking-widest uppercase font-mono bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-300">
+              EventPulse
+            </span>
           </Link>
 
           {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-6">
+          <nav className="hidden md:flex items-center gap-8">
             {navLink("/events", "Browse events")}
             {isOrganizer && navLink("/dashboard", "Dashboard")}
             {user && navLink("/my-tickets", "My tickets")}
           </nav>
 
           {/* Desktop auth */}
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-4">
             {user ? (
-              <>
-                <span className="text-xs text-gray-400 mr-1">{user.name}</span>
-                <button onClick={logout} className="ep-btn-ghost text-sm">
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-gray-400 font-semibold border border-white/5 bg-white/5 px-2.5 py-1 rounded">
+                  {user.name}
+                </span>
+                <button
+                  onClick={logout}
+                  className="text-xs font-bold uppercase tracking-wider text-gray-400 hover:text-white transition-colors cursor-pointer"
+                >
                   Sign out
                 </button>
-              </>
+              </div>
             ) : (
               <>
-                <Link href="/auth/login" className="ep-btn-ghost">Sign in</Link>
-                <Link href="/auth/register" className="ep-btn-primary">Get started</Link>
+                <Link href="/auth/login" className="text-xs font-bold uppercase tracking-wider text-gray-400 hover:text-white transition-colors">
+                  Sign in
+                </Link>
+                <Link
+                  href="/auth/register"
+                  className="ep-btn-primary text-xs font-bold uppercase tracking-wider px-5 py-2 shadow-[0_0_15px_rgba(124,58,237,0.35)] glow-btn-hover"
+                >
+                  Get started
+                </Link>
               </>
             )}
           </div>
 
           {/* Mobile hamburger */}
           <button
-            className="md:hidden p-2 text-gray-500 hover:text-gray-900"
+            className="md:hidden p-2 text-gray-400 hover:text-white transition-colors"
             onClick={() => setMenuOpen(!menuOpen)}
             aria-label="Toggle menu"
           >
@@ -76,22 +93,22 @@ export default function Navbar() {
 
         {/* Mobile menu */}
         {menuOpen && (
-          <div className="md:hidden border-t border-gray-100 py-3 flex flex-col gap-3">
-            <Link href="/events" className="text-sm text-gray-600" onClick={() => setMenuOpen(false)}>Browse events</Link>
+          <div className="md:hidden border-t border-white/5 py-4 flex flex-col gap-4 bg-slate-950/95 backdrop-blur-lg">
+            <Link href="/events" className="text-xs font-bold uppercase tracking-wider text-gray-300 hover:text-white px-2" onClick={() => setMenuOpen(false)}>Browse events</Link>
             {isOrganizer && (
-              <Link href="/dashboard" className="text-sm text-gray-600" onClick={() => setMenuOpen(false)}>Dashboard</Link>
+              <Link href="/dashboard" className="text-xs font-bold uppercase tracking-wider text-gray-300 hover:text-white px-2" onClick={() => setMenuOpen(false)}>Dashboard</Link>
             )}
             {user && (
-              <Link href="/my-tickets" className="text-sm text-gray-600" onClick={() => setMenuOpen(false)}>My tickets</Link>
+              <Link href="/my-tickets" className="text-xs font-bold uppercase tracking-wider text-gray-300 hover:text-white px-2" onClick={() => setMenuOpen(false)}>My tickets</Link>
             )}
             {user ? (
-              <button onClick={() => { logout(); setMenuOpen(false); }} className="text-left text-sm text-gray-500">
+              <button onClick={() => { logout(); setMenuOpen(false); }} className="text-left text-xs font-bold uppercase tracking-wider text-gray-400 hover:text-white px-2">
                 Sign out
               </button>
             ) : (
-              <div className="flex gap-2 pt-1">
-                <Link href="/auth/login" className="ep-btn-secondary flex-1 text-center" onClick={() => setMenuOpen(false)}>Sign in</Link>
-                <Link href="/auth/register" className="ep-btn-primary flex-1 text-center" onClick={() => setMenuOpen(false)}>Get started</Link>
+              <div className="flex gap-3 pt-2 px-2 border-t border-white/5">
+                <Link href="/auth/login" className="ep-btn-secondary flex-1 text-center py-2" onClick={() => setMenuOpen(false)}>Sign in</Link>
+                <Link href="/auth/register" className="ep-btn-primary flex-1 text-center py-2" onClick={() => setMenuOpen(false)}>Get started</Link>
               </div>
             )}
           </div>

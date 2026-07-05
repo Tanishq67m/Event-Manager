@@ -59,9 +59,20 @@ export async function getPublicEventBySlug(slug: string) {
 // ── Organizer ─────────────────────────────────────────────────────────────────
 
 export async function createEvent(userId: string, input: CreateEventInput) {
-  // Get this user's organization
-  const org = await prisma.organization.findUnique({ where: { ownerId: userId } });
-  if (!org) throw new ValidationError("Create an organization before creating events");
+  // Get this user's organization or auto-provision if not exists
+  let org = await prisma.organization.findUnique({ where: { ownerId: userId } });
+  if (!org) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const name = user ? `${user.name}'s Org` : "My Organization";
+    const slug = `${userId.substring(0, 8)}-org-${Math.floor(Math.random() * 10000)}`;
+    org = await prisma.organization.create({
+      data: {
+        name,
+        slug,
+        ownerId: userId,
+      }
+    });
+  }
 
   const slug = uniqueSlug(input.title);
 
@@ -93,8 +104,19 @@ export async function createEvent(userId: string, input: CreateEventInput) {
 }
 
 export async function getOrganizerEvents(userId: string) {
-  const org = await prisma.organization.findUnique({ where: { ownerId: userId } });
-  if (!org) throw new NotFoundError("Organization");
+  let org = await prisma.organization.findUnique({ where: { ownerId: userId } });
+  if (!org) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const name = user ? `${user.name}'s Org` : "My Organization";
+    const slug = `${userId.substring(0, 8)}-org-${Math.floor(Math.random() * 10000)}`;
+    org = await prisma.organization.create({
+      data: {
+        name,
+        slug,
+        ownerId: userId,
+      }
+    });
+  }
 
   return prisma.event.findMany({
     where: { organizationId: org.id },
