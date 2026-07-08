@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { env } from "../../config/env";
+import { logger } from "../../utils/logger";
 
 const resend = new Resend(env.RESEND_API_KEY || "re_dummy_key_to_prevent_startup_crash");
 
@@ -116,7 +117,7 @@ export async function sendTicketConfirmation(data: TicketEmailData) {
     });
   } catch (err) {
     // Don't throw — booking is confirmed, email failure is non-fatal
-    console.error("Failed to send ticket confirmation email:", err);
+    logger.error({ err }, "Failed to send ticket confirmation email");
   }
 }
 
@@ -152,7 +153,7 @@ export async function sendOrganizerNotification(data: OrganizerNotificationData)
       html,
     });
   } catch (err) {
-    console.error("Failed to send organizer notification:", err);
+    logger.error({ err }, "Failed to send organizer notification");
   }
 }
 
@@ -201,6 +202,6 @@ export async function sendEventReminder(data: {
       html,
     });
   } catch (err) {
-    console.error("Failed to send event reminder:", err);
+    logger.error({ err }, "Failed to send event reminder");
   }
 }

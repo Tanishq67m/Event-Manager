@@ -2,6 +2,7 @@ import Razorpay from "razorpay";
 import crypto from "crypto";
 import { prisma } from "../../prisma/client";
 import { env } from "../../config/env";
+import { logger } from "../../utils/logger";
 import { NotFoundError, ValidationError, ForbiddenError, AppError } from "../../utils/AppError";
 import { sendTicketConfirmation, sendOrganizerNotification } from "../emails/email.service";
 
@@ -43,7 +44,7 @@ export async function createOrder(userId: string, bookingId: string) {
     orderId = `order_mock_${Math.random().toString(36).substring(2, 11)}`;
     amount = booking.totalAmount;
     currency = "INR";
-    console.log(`[Mock Payment] Created mock Razorpay order: ${orderId} for booking: ${booking.id}`);
+    logger.info(`[Mock Payment] Created mock Razorpay order: ${orderId} for booking: ${booking.id}`);
   } else {
     // Create Razorpay order
     const order = await razorpay!.orders.create({
@@ -97,9 +98,9 @@ export async function verifyPayment(
   // Recompute expected signature
   const isMockOrder = razorpayOrderId.startsWith("order_mock_");
   if (isMockMode || isMockOrder) {
-    console.log(`[Mock Payment] Skipping signature verification for order ${razorpayOrderId}`);
+    logger.info(`[Mock Payment] Skipping signature verification for order ${razorpayOrderId}`);
     if (razorpaySignature !== "mock_signature" && razorpaySignature !== "xxxx") {
-      console.log(`[Mock Payment] Accepting mock signature: ${razorpaySignature}`);
+      logger.info(`[Mock Payment] Accepting mock signature: ${razorpaySignature}`);
     }
   } else {
     const body = `${razorpayOrderId}|${razorpayPaymentId}`;
@@ -190,7 +191,7 @@ export async function verifyPayment(
 export async function handleWebhook(rawBody: Buffer, signature: string) {
   // Verify webhook signature
   if (isMockMode || signature === "mock_webhook_signature") {
-    console.log(`[Mock Webhook] Skipping webhook signature verification`);
+    logger.info(`[Mock Webhook] Skipping webhook signature verification`);
   } else {
     const expectedSig = crypto
       .createHmac("sha256", env.RAZORPAY_WEBHOOK_SECRET)
@@ -238,7 +239,7 @@ async function handlePaymentCaptured(payment: {
   });
 
   if (!booking) {
-    console.error("Webhook: booking not found for order", payment.order_id);
+    logger.error({ orderId: payment.order_id }, "Webhook: booking not found for order");
     return;
   }
 

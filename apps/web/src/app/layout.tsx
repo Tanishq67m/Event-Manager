@@ -11,13 +11,16 @@ export const metadata: Metadata = {
   description: "The easiest way to create, sell tickets, and manage attendees for any event.",
 };
 
+import { Toaster } from "sonner";
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className={`${inter.variable} font-sans bg-white text-gray-900 antialiased`}>
+    <html lang="en" className="dark">
+      <body className={`${inter.variable} font-sans bg-[#0a0910] text-gray-100 antialiased`}>
         <AuthProvider>
           <Navbar />
           <main>{children}</main>
+          <Toaster theme="dark" position="bottom-right" />
         </AuthProvider>
       </body>
     </html>

@@ -48,3 +48,30 @@ export async function getMeHandler(req: Request, res: Response, next: NextFuncti
     next(err);
   }
 }
+
+export async function verifyEmailHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await authService.verifyEmail(req.body);
+    sendSuccess(res, result, result.message);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function forgotPasswordHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await authService.forgotPassword(req.body);
+    sendSuccess(res, result, result.message);
+  } catch (err) {
+    next(err);
+  }
+}
+
+export async function resetPasswordHandler(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await authService.resetPassword(req.body);
+    sendSuccess(res, result, result.message);
+  } catch (err) {
+    next(err);
+  }
+}

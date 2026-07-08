@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { Html5QrcodeScanner } from "html5-qrcode";
 import { checkin, EventAnalytics } from "@/lib/api";
 import { formatPrice } from "@/lib/utils";
 
@@ -23,16 +24,67 @@ export default function CheckinPage() {
   const [qrInput, setQrInput] = useState("");
   const [result, setResult] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
+  const [useCamera, setUseCamera] = useState(false);
   
   // Flash overlay visible state
   const [showFlash, setShowFlash] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  
+  // Lock to prevent duplicate fast camera scans
+  const lastScanRef = useRef<number>(0);
+
+  useEffect(() => {
+    let scanner: Html5QrcodeScanner | null = null;
+    
+    if (useCamera) {
+      scanner = new Html5QrcodeScanner(
+        "reader",
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        false
+      );
+
+      scanner.render(
+        async (decodedText) => {
+          const now = Date.now();
+          // Debounce: prevent duplicate scan within 3 seconds
+          if (now - lastScanRef.current < 3000) return;
+          lastScanRef.current = now;
+
+          setScanning(true);
+          try {
+            const res = await checkin.scan(decodedText.trim().toUpperCase());
+            setResult(res);
+            setShowFlash(true);
+            if (res.valid) loadAnalytics();
+            setTimeout(() => setShowFlash(false), 4000);
+          } catch (err: unknown) {
+            const errRes: ScanResult = { 
+              valid: false, 
+              reason: err instanceof Error ? err.message : "Scan failed" 
+            };
+            setResult(errRes);
+            setShowFlash(true);
+            setTimeout(() => setShowFlash(false), 4000);
+          } finally {
+            setScanning(false);
+          }
+        },
+        (error) => { /* Ignore standard read errors to prevent console spam */ }
+      );
+    }
+
+    return () => {
+      if (scanner) {
+        scanner.clear().catch(console.error);
+      }
+    };
+  }, [useCamera, id]);
 
   useEffect(() => {
     loadAnalytics();
-    inputRef.current?.focus();
-  }, [id]);
+    if (!useCamera) inputRef.current?.focus();
+  }, [id, useCamera]);
 
   async function loadAnalytics() {
     try {
@@ -169,26 +221,47 @@ export default function CheckinPage() {
           {/* Left panel: Code Scan input & Feeds */}
           <div className="lg:col-span-6 space-y-6">
             
-            {/* Input card */}
-            <div className="glass-card p-6 rounded-xl border border-white/10 space-y-4">
-              <h3 className="font-bold text-white text-sm">Gate Validation input</h3>
-              <form onSubmit={handleScan} className="flex gap-2">
-                <input
-                  ref={inputRef}
-                  type="text"
-                  className="ep-input font-mono tracking-widest text-sm uppercase bg-slate-950/60"
-                  placeholder="EP-2026-XXXXXXXXXX"
-                  value={qrInput}
-                  onChange={(e) => setQrInput(e.target.value)}
-                  autoComplete="off"
-                  required
-                />
-                <button type="submit" className="ep-btn-primary px-6" disabled={scanning}>
-                  {scanning ? "..." : "Scan"}
+            {/* Input card with Live Camera */}
+            <div className="glass-card p-6 rounded-xl border border-white/10 space-y-6">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-white text-sm">Gate Validation</h3>
+                <button 
+                  onClick={() => setUseCamera(!useCamera)} 
+                  className="text-[10px] uppercase font-bold text-violet-400 hover:text-white bg-violet-500/10 px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  {useCamera ? "Switch to Manual" : "Use Camera"}
                 </button>
-              </form>
+              </div>
+
+              {useCamera ? (
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed border-white/10 rounded-xl overflow-hidden bg-black p-2">
+                    <div id="reader" className="w-full"></div>
+                  </div>
+                  <p className="text-[10px] text-center text-emerald-400 font-semibold animate-pulse">
+                    Camera active. Align QR code within the frame to scan.
+                  </p>
+                </div>
+              ) : (
+                <form onSubmit={handleScan} className="flex gap-2">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    className="ep-input font-mono tracking-widest text-sm uppercase bg-slate-950/60"
+                    placeholder="EP-2026-XXXXXXXXXX"
+                    value={qrInput}
+                    onChange={(e) => setQrInput(e.target.value)}
+                    autoComplete="off"
+                    required
+                  />
+                  <button type="submit" className="ep-btn-primary px-6" disabled={scanning}>
+                    {scanning ? "..." : "Scan"}
+                  </button>
+                </form>
+              )}
+              
               <p className="text-[10px] text-gray-500 font-semibold leading-normal">
-                Type code or autofocus to scan with standard USB barcode scanners.
+                {!useCamera && "Type code or autofocus to scan with standard USB barcode scanners."}
               </p>
             </div>
 

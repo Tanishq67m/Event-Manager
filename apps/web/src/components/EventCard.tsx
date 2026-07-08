@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Event } from "@/lib/api";
 import { formatDate, formatPrice } from "@/lib/utils";
+import { CalendarDays, MapPin, Image as ImageIcon } from "lucide-react";
 
 export default function EventCard({ event }: { event: Event }) {
   const lowestPrice = event.ticketTypes.length > 0
@@ -20,7 +21,7 @@ export default function EventCard({ event }: { event: Event }) {
             <img src={event.bannerUrl} alt={event.title} className="w-full h-full object-cover" />
           ) : (
             <div className="flex flex-col items-center gap-2">
-              <span className="text-violet-400 text-5xl select-none animate-pulse">🎯</span>
+              <ImageIcon className="h-10 w-10 text-violet-400/50" />
               <span className="text-[10px] text-gray-500 uppercase tracking-widest font-semibold">EventPulse</span>
             </div>
           )}
@@ -48,17 +49,12 @@ export default function EventCard({ event }: { event: Event }) {
 
           <div className="space-y-1.5 text-xs text-gray-400">
             <p className="flex items-center gap-2">
-              <svg className="h-3.5 w-3.5 text-violet-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
+              <MapPin className="h-3.5 w-3.5 text-violet-400 shrink-0" />
               <span className="truncate">{event.venue}</span>
             </p>
 
             <p className="flex items-center gap-2">
-              <svg className="h-3.5 w-3.5 text-violet-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
+              <CalendarDays className="h-3.5 w-3.5 text-violet-400 shrink-0" />
               <span>{formatDate(event.startsAt)}</span>
             </p>
           </div>

@@ -1,13 +1,23 @@
 import { Router } from "express";
 import { validate } from "../../middleware/validate";
 import { authenticate } from "../../middleware/authenticate";
-import { registerSchema, loginSchema, refreshSchema } from "./auth.schema";
+import { 
+  registerSchema, 
+  loginSchema, 
+  refreshSchema, 
+  forgotPasswordSchema, 
+  resetPasswordSchema, 
+  verifyEmailSchema 
+} from "./auth.schema";
 import {
   registerHandler,
   loginHandler,
   refreshHandler,
   logoutHandler,
   getMeHandler,
+  verifyEmailHandler,
+  forgotPasswordHandler,
+  resetPasswordHandler,
 } from "./auth.controller";
 
 const router = Router();
@@ -26,5 +36,14 @@ router.post("/logout", validate(refreshSchema), logoutHandler);
 
 // GET /auth/me  — get current user (protected)
 router.get("/me", authenticate, getMeHandler);
+
+// POST /auth/verify-email
+router.post("/verify-email", validate(verifyEmailSchema), verifyEmailHandler);
+
+// POST /auth/forgot-password
+router.post("/forgot-password", validate(forgotPasswordSchema), forgotPasswordHandler);
+
+// POST /auth/reset-password
+router.post("/reset-password", validate(resetPasswordSchema), resetPasswordHandler);
 
 export default router;

@@ -223,6 +223,8 @@ export const organizations = {
 
   mine: () => request<Organization>("/organizations/me/profile"),
 
+  bySlug: (slug: string) => request<Organization & { events: Event[] }>(`/organizations/${slug}`, {}, false),
+
   update: (body: { name?: string; description?: string }) =>
     request<Organization>("/organizations/me/profile", { method: "PATCH", body: JSON.stringify(body) }),
 };

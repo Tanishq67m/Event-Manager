@@ -2,6 +2,7 @@
 import app from "./app";
 import { env } from "./config/env";
 import { prisma } from "./prisma/client";
+import { logger } from "./utils/logger";
 
 const PORT = parseInt(env.PORT, 10);
 
@@ -9,23 +10,23 @@ async function main() {
   // Verify DB connection before starting
   try {
     await prisma.$connect();
-    console.log("✅  Database connected");
+    logger.info("Database connected");
   } catch (err) {
-    console.error("❌  Failed to connect to database:", err);
+    logger.error({ err }, "Failed to connect to database");
     process.exit(1);
   }
 
   const server = app.listen(PORT, () => {
-    console.log(`🚀  EventPulse API running on http://localhost:${PORT}`);
-    console.log(`📌  Environment: ${env.NODE_ENV}`);
+    logger.info(`EventPulse API running on http://localhost:${PORT}`);
+    logger.info(`Environment: ${env.NODE_ENV}`);
   });
 
   // Graceful shutdown
   const shutdown = async (signal: string) => {
-    console.log(`\n${signal} received. Shutting down gracefully...`);
+    logger.info(`${signal} received. Shutting down gracefully...`);
     server.close(async () => {
       await prisma.$disconnect();
-      console.log("✅  Server closed");
+      logger.info("Server closed");
       process.exit(0);
     });
   };

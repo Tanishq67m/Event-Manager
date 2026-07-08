@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../../middleware/authenticate";
+import { validate } from "../../middleware/validate";
+import { createOrderSchema, verifyPaymentSchema } from "./payments.schema";
 import {
   createOrderHandler,
   verifyPaymentHandler,
@@ -14,9 +16,9 @@ const router = Router();
 router.post("/webhook", webhookHandler);
 
 // POST /payments/order   — create Razorpay order for a pending booking
-router.post("/order", authenticate, createOrderHandler);
+router.post("/order", authenticate, validate(createOrderSchema), createOrderHandler);
 
 // POST /payments/verify  — verify payment signature after checkout
-router.post("/verify", authenticate, verifyPaymentHandler);
+router.post("/verify", authenticate, validate(verifyPaymentSchema), verifyPaymentHandler);
 
 export default router;
