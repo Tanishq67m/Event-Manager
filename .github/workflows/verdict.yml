@@ -73,7 +73,10 @@ jobs:
           VERDICT_SEED: "1"
         run: |
           npx prisma generate
-          npx prisma migrate deploy
+          # db push, not migrate deploy: the committed migrations are behind schema.prisma
+          # (e.g. User.emailVerified was added without a migration), so the throwaway CI
+          # database is built straight from the schema the app actually uses.
+          npx prisma db push
           node scripts/seed-verdict.mjs
 
       - name: Build
