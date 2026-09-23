@@ -23,7 +23,7 @@ app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
 // ── Rate limiting ──────────────────────────────────────────────────────────────
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: Number(process.env.RATE_LIMIT_MAX ?? 100),
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, error: "Too many requests, please try again later" },
@@ -31,7 +31,7 @@ const limiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: Number(process.env.AUTH_RATE_LIMIT_MAX ?? 20),
   message: { success: false, error: "Too many auth attempts, please try again later" },
 });
 
