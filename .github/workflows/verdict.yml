@@ -1,0 +1,107 @@
+name: Verdict
+
+# Builds this PR's EventPulse (API + web + Postgres) inside the runner, then lets Verdict
+# check the acceptance criteria in .verdict.yml in a real browser. The result lands on the PR
+# as a check and a single comment that updates on every push.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: verdict-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verdict:
+    name: Verdict
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: eventpulse
+          POSTGRES_PASSWORD: eventpulse
+          POSTGRES_DB: eventpulse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U eventpulse"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://eventpulse:eventpulse@localhost:5432/eventpulse
+      PORT: "5001"
+      FRONTEND_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:5001/api
+      # The test run makes many requests from one IP; production defaults stay 100 / 20.
+      RATE_LIMIT_MAX: "5000"
+      AUTH_RATE_LIMIT_MAX: "1000"
+      VERDICT_TEST_EMAIL: verdict-tester@example.com
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Generate throwaway secrets for this run
+        run: |
+          for name in JWT_ACCESS_SECRET JWT_REFRESH_SECRET VERDICT_TEST_PASSWORD; do
+            value="$(openssl rand -hex 32)"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Install
+        run: npm ci
+
+      - name: Database schema and test data
+        working-directory: apps/api
+        env:
+          VERDICT_SEED: "1"
+        run: |
+          npx prisma generate
+          npx prisma migrate deploy
+          node scripts/seed-verdict.mjs
+
+      - name: Build
+        run: npm run build
+
+      - name: Start API and web
+        env:
+          # Only here: set earlier, `npm ci` would skip devDependencies and the build would fail.
+          NODE_ENV: production
+        run: |
+          (cd apps/api && nohup npm start > "$RUNNER_TEMP/api.log" 2>&1 &)
+          (cd apps/web && nohup npm start -- -p 3000 > "$RUNNER_TEMP/web.log" 2>&1 &)
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:5001/health > /dev/null && curl -fsS http://localhost:3000 > /dev/null; then
+              echo "EventPulse is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "EventPulse did not start"; tail -n 50 "$RUNNER_TEMP/api.log" "$RUNNER_TEMP/web.log"; exit 1
+
+      - name: Verdict
+        uses: Tanishq67m/Verdict-AlanAI/action@main
+        with:
+          url: http://localhost:3000
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          reset: eventpulse
+          reset-api-url: http://localhost:5001/api
+
+      - name: App logs (on failure)
+        if: failure()
+        run: tail -n 100 "$RUNNER_TEMP/api.log" "$RUNNER_TEMP/web.log" || true

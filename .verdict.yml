@@ -1,0 +1,18 @@
+# Acceptance criteria that Verdict checks in a real browser on every pull request.
+# Credentials come from environment variables (set by the CI workflow), never from this file.
+version: 1
+task: Ticket booking
+base_url: ${PREVIEW_URL}
+auth:
+  email: ${VERDICT_TEST_EMAIL}
+  password: ${VERDICT_TEST_PASSWORD}
+criteria:
+  - id: book-ticket
+    check: A logged-in user can book one ticket for "Verdict Demo Night" and sees a confirmation.
+  - id: seat-count
+    check: When a logged-in user books one ticket for "Verdict Demo Night", the number of remaining seats shown for that event drops by exactly 1.
+  - id: sold-out
+    check: For the sold-out event "Verdict Sold Out Night", the event page shows it as sold out and a logged-in user has no way to book a ticket.
+limits:
+  max_steps_per_criterion: 15
+  timeout_seconds: 300
