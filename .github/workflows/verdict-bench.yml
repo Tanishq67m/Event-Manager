@@ -1,0 +1,242 @@
+name: Verdict benchmark
+
+# Seeded-bug benchmark for Verdict (Milestone 4). For each case, builds EventPulse from main
+# inside the runner (with one bug patch from Verdict's bench/bugs applied, or none for "clean"),
+# runs Verdict several times, and a final job turns the raw verdicts into the results table.
+#
+#   clean  : the full task (every criterion in .verdict.yml), clean_runs times -> false fails, latency, cost
+#   B1..B6 : only the criterion that should catch that bug, bug_runs times      -> catch rate
+#
+# Cases run one at a time because they share one Gemini API key (rate limits).
+
+on:
+  workflow_dispatch:
+    inputs:
+      cases:
+        description: Comma-separated cases (clean, B1..B6)
+        default: clean,B1,B2,B3,B4,B5,B6
+      clean_runs:
+        description: Runs of the clean build
+        default: "5"
+      bug_runs:
+        description: Runs per bug
+        default: "3"
+      verdict_ref:
+        description: Verdict branch or commit to benchmark
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verdict-bench
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      cases: ${{ steps.plan.outputs.cases }}
+    steps:
+      - id: plan
+        env:
+          CASES: ${{ inputs.cases }}
+        run: |
+          cases=$(jq -Rc 'split(",") | map(gsub("\\s"; "")) | map(select(test("^(clean|B[1-6])$")))' <<< "$CASES")
+          echo "cases=$cases" >> "$GITHUB_OUTPUT"
+          echo "Cases: $cases"
+
+  case:
+    needs: plan
+    name: ${{ matrix.case }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        case: ${{ fromJSON(needs.plan.outputs.cases) }}
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: eventpulse
+          POSTGRES_PASSWORD: eventpulse
+          POSTGRES_DB: eventpulse
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U eventpulse"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      CASE: ${{ matrix.case }}
+      DATABASE_URL: postgresql://eventpulse:eventpulse@localhost:5432/eventpulse
+      PORT: "5001"
+      FRONTEND_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:5001/api
+      RATE_LIMIT_MAX: "5000"
+      AUTH_RATE_LIMIT_MAX: "1000"
+      VERDICT_TEST_EMAIL: verdict-tester@example.com
+      PREVIEW_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out Verdict
+        uses: actions/checkout@v4
+        with:
+          repository: Tanishq67m/Verdict-AlanAI
+          ref: ${{ inputs.verdict_ref }}
+          path: .verdict
+
+      - name: Seed the bug
+        if: matrix.case != 'clean'
+        run: |
+          git apply ".verdict/bench/bugs/${CASE}.patch"
+          git diff --stat
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Generate throwaway secrets for this run
+        run: |
+          for name in JWT_ACCESS_SECRET JWT_REFRESH_SECRET VERDICT_TEST_PASSWORD; do
+            value="$(openssl rand -hex 32)"
+            echo "::add-mask::$value"
+            echo "$name=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Install
+        run: npm ci
+
+      - name: Database schema and test data
+        working-directory: apps/api
+        env:
+          VERDICT_SEED: "1"
+        run: |
+          npx prisma generate
+          npx prisma db push
+          node scripts/seed-verdict.mjs
+
+      - name: Build
+        run: npm run build
+
+      - name: Start API and web
+        env:
+          NODE_ENV: production
+        run: |
+          (cd apps/api && nohup npm start > "$RUNNER_TEMP/api.log" 2>&1 &)
+          (cd apps/web && nohup npm start -- -p 3000 > "$RUNNER_TEMP/web.log" 2>&1 &)
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:5001/health > /dev/null && curl -fsS http://localhost:3000 > /dev/null; then
+              echo "EventPulse is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "EventPulse did not start"; tail -n 50 "$RUNNER_TEMP/api.log" "$RUNNER_TEMP/web.log"; exit 1
+
+      - name: Install Verdict and Chromium
+        working-directory: .verdict
+        run: |
+          npm install -g pnpm@12.5.1
+          pnpm install --frozen-lockfile
+          pnpm --filter @verdict/worker exec playwright install --with-deps chromium
+
+      - name: Run Verdict
+        working-directory: .verdict
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VERDICT_RESET: eventpulse
+          VERDICT_RESET_API_URL: http://localhost:5001/api
+          CLEAN_RUNS: ${{ inputs.clean_runs }}
+          BUG_RUNS: ${{ inputs.bug_runs }}
+        run: |
+          set +e
+          out="$RUNNER_TEMP/bench/$CASE"
+          mkdir -p "$out"
+          if [ "$CASE" = "clean" ]; then
+            runs="$CLEAN_RUNS"; flags=""
+          else
+            runs="$BUG_RUNS"
+            criterion=$(jq -r --arg id "$CASE" '.[] | select(.id == $id) | .criterion' bench/bugs.json)
+            flags="--criterion $criterion"
+          fi
+          for i in $(seq 1 "$runs"); do
+            echo "::group::$CASE run $i"
+            # shellcheck disable=SC2086
+            pnpm exec tsx apps/worker/src/cli.ts run --spec "$GITHUB_WORKSPACE/.verdict.yml" --url http://localhost:3000 \
+              --commit "$GITHUB_SHA" --artifacts-dir "$RUNNER_TEMP/reports/$CASE-run$i" $flags \
+              > "$out/run$i.json" 2> "$out/run$i.log"
+            echo "exit code $?"
+            jq -c '{status, summary, duration_ms, cost}' "$out/run$i.json" || tail -n 5 "$out/run$i.log"
+            echo "::endgroup::"
+          done
+          exit 0
+
+      - name: Upload raw verdicts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.case }}
+          path: ${{ runner.temp }}/bench/
+          retention-days: 30
+
+      - name: Upload HTML reports and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.case }}
+          path: ${{ runner.temp }}/reports/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: App logs
+        if: always()
+        run: tail -n 60 "$RUNNER_TEMP/api.log" "$RUNNER_TEMP/web.log" || true
+
+  summary:
+    needs: case
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Verdict
+        uses: actions/checkout@v4
+        with:
+          repository: Tanishq67m/Verdict-AlanAI
+          ref: ${{ inputs.verdict_ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: |
+          npm install -g pnpm@12.5.1
+          pnpm install --frozen-lockfile
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bench-*
+          path: results
+          merge-multiple: true
+
+      - name: Summarize
+        run: |
+          pnpm exec tsx bench/src/main.ts results | tee -a "$GITHUB_STEP_SUMMARY"
+          {
+            echo ""
+            echo "EventPulse \`$GITHUB_SHA\` · Verdict \`$(git rev-parse --short HEAD)\` · run ${{ github.run_id }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: verdict-benchmark-results
+          path: results/
+          retention-days: 90
