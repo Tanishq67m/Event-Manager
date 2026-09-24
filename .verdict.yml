@@ -13,6 +13,10 @@ criteria:
     check: When a logged-in user books one ticket for "Verdict Demo Night", the number of remaining seats shown for that event drops by exactly 1.
   - id: sold-out
     check: For the sold-out event "Verdict Sold Out Night", the event page shows it as sold out and a logged-in user has no way to book a ticket.
+  - id: price-matches
+    check: On the event page for "Verdict Pricing Night", a logged-in user who selects the "Standard" ticket (₹499 each) and sets the quantity to 2 sees a total price of ₹998. Do not book.
+  - id: ticket-qr
+    check: After a logged-in user books one ticket for "Verdict Demo Night", the My Tickets page lists that booking as confirmed with its entry QR code.
 limits:
   max_steps_per_criterion: 15
   timeout_seconds: 300

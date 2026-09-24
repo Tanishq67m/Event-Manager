@@ -50,7 +50,9 @@ async function upsertUser(email, password, name, role) {
   });
 }
 
-async function upsertEvent(organizationId, slug, title, seats) {
+const FREE_TIER = { name: "General Admission", description: "Free entry", price: 0 };
+
+async function upsertEvent(organizationId, slug, title, seats, tier = FREE_TIER) {
   const existing = await prisma.event.findUnique({ where: { slug }, include: { ticketTypes: true } });
   if (existing) return existing;
   return prisma.event.create({
@@ -64,7 +66,7 @@ async function upsertEvent(organizationId, slug, title, seats) {
       status: "PUBLISHED",
       startsAt,
       endsAt,
-      ticketTypes: { create: [{ name: "General Admission", description: "Free entry", price: 0, totalQuantity: seats }] },
+      ticketTypes: { create: [{ ...tier, totalQuantity: seats }] },
     },
     include: { ticketTypes: true },
   });
@@ -83,6 +85,12 @@ async function main() {
 
   const demo = await upsertEvent(org.id, "verdict-demo-night", "Verdict Demo Night", 40);
   const soldOut = await upsertEvent(org.id, "verdict-sold-out-night", "Verdict Sold Out Night", 1);
+  // Paid event for the price check (never booked: paid bookings need a payment step). Price is in paise.
+  const pricing = await upsertEvent(org.id, "verdict-pricing-night", "Verdict Pricing Night", 100, {
+    name: "Standard",
+    description: "Reserved seating",
+    price: 49900,
+  });
 
   // Sell the only Sold Out Night seat to the organizer (once).
   const soldOutTicket = soldOut.ticketTypes[0];
@@ -103,7 +111,7 @@ async function main() {
   }
 
   console.log(
-    `seed-verdict: attendee ${attendee.email}; events "${demo.title}" (${demo.ticketTypes[0]?.totalQuantity} seats) and "${soldOut.title}" (sold out)`,
+    `seed-verdict: attendee ${attendee.email}; events "${demo.title}" (${demo.ticketTypes[0]?.totalQuantity} seats) "${soldOut.title}" (sold out) and "${pricing.title}" (₹499 tickets)`,
   );
 }
 
