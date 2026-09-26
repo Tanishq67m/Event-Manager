@@ -69,6 +69,10 @@ export default function EventDetailPage() {
     if (!user) { router.push(`/auth/login?redirect=/events/${slug}`); return; }
     if (!selectedTicket) return;
 
+    // Remember how many tickets this user usually books, to preselect it next time
+    const previous = JSON.parse(localStorage.getItem("ep_last_quantity") ?? '{"count":0}');
+    localStorage.setItem("ep_last_quantity", JSON.stringify({ count: previous.count + quantity }));
+
     setBooking(true);
     setBookingError("");
     try {
