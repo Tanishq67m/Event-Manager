@@ -87,7 +87,23 @@ export interface Booking {
   quantity: number;
   totalAmount: number;
   createdAt: string;
+  checkedIn?: boolean;
+  checkedInAt?: string | null;
   ticketType: TicketType & { event: Event };
+}
+
+/** Organizer view of a confirmed booking (GET /bookings/event/:eventId). */
+export interface EventBooking {
+  id: string;
+  status: Booking["status"];
+  qrCode: string;
+  quantity: number;
+  totalAmount: number;
+  checkedIn: boolean;
+  checkedInAt: string | null;
+  createdAt: string;
+  user: { id: string; name: string; email: string };
+  ticketType: { id: string; name: string; price: number };
 }
 
 export interface EventAnalytics {
@@ -174,6 +190,21 @@ export const auth = {
 
   logout: (refreshToken: string) =>
     request<null>("/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }),
+
+  verifyEmail: (token: string) =>
+    request<{ success: boolean; message: string }>(
+      "/auth/verify-email", { method: "POST", body: JSON.stringify({ token }) }, false
+    ),
+
+  forgotPassword: (email: string) =>
+    request<{ success: boolean; message: string }>(
+      "/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) }, false
+    ),
+
+  resetPassword: (token: string, newPassword: string) =>
+    request<{ success: boolean; message: string }>(
+      "/auth/reset-password", { method: "POST", body: JSON.stringify({ token, newPassword }) }, false
+    ),
 };
 
 // ── Events ────────────────────────────────────────────────────────────────────
@@ -221,7 +252,7 @@ export const organizations = {
   create: (body: { name: string; description?: string }) =>
     request<Organization>("/organizations", { method: "POST", body: JSON.stringify(body) }),
 
-  mine: () => request<Organization>("/organizations/me/profile"),
+  mine: () => request<Organization & { _count?: { events: number } }>("/organizations/me/profile"),
 
   bySlug: (slug: string) => request<Organization & { events: Event[] }>(`/organizations/${slug}`, {}, false),
 
@@ -239,7 +270,7 @@ export const bookings = {
 
   byId: (id: string) => request<Booking>(`/bookings/${id}`),
 
-  forEvent: (eventId: string) => request<Booking[]>(`/bookings/event/${eventId}`),
+  forEvent: (eventId: string) => request<EventBooking[]>(`/bookings/event/${eventId}`),
 
   cancel: (id: string) => request<Booking>(`/bookings/${id}/cancel`, { method: "DELETE" }),
 };
@@ -259,15 +290,41 @@ export const payments = {
 // ── Check-in ──────────────────────────────────────────────────────────────────
 
 export const checkin = {
-  scan: (qrCode: string) =>
+  // The scan endpoint's request schema requires eventId; without it every scan fails validation.
+  scan: (qrCode: string, eventId: string) =>
     request<{ valid: boolean; message?: string; reason?: string; attendee?: string; ticketType?: string; checkedInAt?: string }>(
-      "/checkin/scan", { method: "POST", body: JSON.stringify({ qrCode }) }
+      "/checkin/scan", { method: "POST", body: JSON.stringify({ qrCode, eventId }) }
     ),
 
   analytics: (eventId: string) => request<EventAnalytics>(`/checkin/analytics/${eventId}`),
 
   exportUrl: (eventId: string) =>
     `${API_BASE}/checkin/export/${eventId}`,
+
+  /** The export endpoint requires the Bearer token, so fetch it and save the blob. */
+  downloadCsv: async (eventId: string, filename = "attendees.csv") => {
+    const token = getAccessToken();
+    const res = await fetch(`${API_BASE}/checkin/export/${eventId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, body.error || "Export failed");
+    }
+    // With no confirmed attendees the endpoint answers with JSON instead of a CSV.
+    if (res.headers.get("content-type")?.includes("application/json")) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(204, body.message || "No confirmed attendees yet");
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };
 
 export { ApiError };

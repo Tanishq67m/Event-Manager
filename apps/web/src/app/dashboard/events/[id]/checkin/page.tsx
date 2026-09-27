@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
+import { useEffect, useState, useRef, useCallback } from "react";
+import { useParams } from "next/navigation";
 import { Html5QrcodeScanner } from "html5-qrcode";
-import { checkin, EventAnalytics } from "@/lib/api";
-import { formatPrice } from "@/lib/utils";
+import { Camera, CheckCircle2, Download, Keyboard, RefreshCw, XCircle } from "lucide-react";
+import { toast } from "sonner";
+import { checkin, ApiError, EventAnalytics } from "@/lib/api";
+import { cn, formatAmount, formatNumber, formatPrice, formatSchedule, formatTime } from "@/lib/utils";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { Meter } from "@/components/ui/Meter";
+import { Notice } from "@/components/ui/Notice";
+import { ActivityLog } from "@/components/dashboard/ActivityLog";
 
 interface ScanResult {
   valid: boolean;
@@ -18,31 +24,48 @@ interface ScanResult {
 
 export default function CheckinPage() {
   const { id } = useParams<{ id: string }>();
-  const router = useRouter();
 
   const [analytics, setAnalytics] = useState<EventAnalytics | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [qrInput, setQrInput] = useState("");
   const [result, setResult] = useState<ScanResult | null>(null);
+  const [scannedAt, setScannedAt] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [useCamera, setUseCamera] = useState(false);
-  
-  // Flash overlay visible state
+  const [exporting, setExporting] = useState(false);
+
+  // While true, the last result is shown at full strength so gate staff can read it at a glance.
   const [showFlash, setShowFlash] = useState(false);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  
+
   // Lock to prevent duplicate fast camera scans
   const lastScanRef = useRef<number>(0);
 
+  const loadAnalytics = useCallback(async () => {
+    try {
+      const data = await checkin.analytics(id);
+      setAnalytics(data);
+      setLoadError("");
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not load event stats");
+    }
+  }, [id]);
+
+  const showResult = useCallback((res: ScanResult) => {
+    setResult(res);
+    setScannedAt(new Date().toISOString());
+    setShowFlash(true);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setShowFlash(false), 4000);
+  }, []);
+
   useEffect(() => {
     let scanner: Html5QrcodeScanner | null = null;
-    
+
     if (useCamera) {
-      scanner = new Html5QrcodeScanner(
-        "reader",
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        false
-      );
+      scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
 
       scanner.render(
         async (decodedText) => {
@@ -53,47 +76,32 @@ export default function CheckinPage() {
 
           setScanning(true);
           try {
-            const res = await checkin.scan(decodedText.trim().toUpperCase());
-            setResult(res);
-            setShowFlash(true);
+            const res = await checkin.scan(decodedText.trim().toUpperCase(), id);
+            showResult(res);
             if (res.valid) loadAnalytics();
-            setTimeout(() => setShowFlash(false), 4000);
           } catch (err: unknown) {
-            const errRes: ScanResult = { 
-              valid: false, 
-              reason: err instanceof Error ? err.message : "Scan failed" 
-            };
-            setResult(errRes);
-            setShowFlash(true);
-            setTimeout(() => setShowFlash(false), 4000);
+            showResult({ valid: false, reason: err instanceof Error ? err.message : "Scan failed" });
           } finally {
             setScanning(false);
           }
         },
-        (error) => { /* Ignore standard read errors to prevent console spam */ }
+        () => {
+          /* Ignore per-frame read errors to prevent console spam */
+        }
       );
     }
 
     return () => {
-      if (scanner) {
-        scanner.clear().catch(console.error);
-      }
+      if (scanner) scanner.clear().catch(console.error);
     };
-  }, [useCamera, id]);
+  }, [useCamera, id, loadAnalytics, showResult]);
 
   useEffect(() => {
     loadAnalytics();
     if (!useCamera) inputRef.current?.focus();
-  }, [id, useCamera]);
+  }, [id, useCamera, loadAnalytics]);
 
-  async function loadAnalytics() {
-    try {
-      const data = await checkin.analytics(id);
-      setAnalytics(data);
-    } catch (err) {
-      console.error(err);
-    }
-  }
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
 
   async function handleScan(e: React.FormEvent) {
     e.preventDefault();
@@ -101,278 +109,251 @@ export default function CheckinPage() {
     if (!code) return;
 
     setScanning(true);
-    setResult(null);
-    setShowFlash(false);
-    
     try {
-      const res = await checkin.scan(code);
-      setResult(res);
-      setShowFlash(true);
+      const res = await checkin.scan(code, id);
+      showResult(res);
       setQrInput("");
-      
       if (res.valid) loadAnalytics();
-
-      // Automatically auto-close flash after 4 seconds
-      setTimeout(() => {
-        setShowFlash(false);
-      }, 4000);
-      
     } catch (err: unknown) {
-      const errRes: ScanResult = { 
-        valid: false, 
-        reason: err instanceof Error ? err.message : "Scan failed" 
-      };
-      setResult(errRes);
-      setShowFlash(true);
-      setTimeout(() => setShowFlash(false), 4000);
+      showResult({ valid: false, reason: err instanceof Error ? err.message : "Scan failed" });
     } finally {
       setScanning(false);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }
 
-  const exportUrl = `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001/api"}/checkin/export/${id}`;
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      await checkin.downloadCsv(id, "attendees.csv");
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 204) toast(err.message);
+      else toast.error(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  const s = analytics?.summary;
 
   return (
-    <div className="min-h-screen bg-[#08070d] bg-radial-pulse pb-20">
-      <div className="mx-auto max-w-5xl px-4 sm:px-6 py-10 z-10 relative space-y-6">
-        
-        {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
-          <div>
-            <Link href="/dashboard" className="text-xs text-gray-500 hover:text-white transition-colors">
-              ← Back to dashboard
-            </Link>
-            {analytics && (
-              <h1 className="text-2xl font-extrabold text-white mt-1.5">{analytics.event.title}</h1>
-            )}
-            <p className="text-xs text-gray-400 mt-0.5">Live Gate QR Scanner check-ins tool</p>
-          </div>
-          <div className="flex gap-2">
-            <a
-              href={exportUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="ep-btn-secondary text-xs px-4 py-2"
-            >
-              Export CSV
-            </a>
-            <button
-              onClick={loadAnalytics}
-              className="ep-btn-secondary text-xs px-4 py-2"
-            >
-              Refresh Stats
+    <div className="space-y-6">
+      <PageHeader
+        back={{ href: "/dashboard", label: "Overview" }}
+        title={analytics ? analytics.event.title : <span className="ep-skeleton inline-block h-6 w-64 align-middle" />}
+        meta={
+          analytics && (
+            <>
+              <span className="tabular">{formatSchedule(analytics.event.startsAt)}</span>
+              <span>{analytics.event.venue}</span>
+            </>
+          )
+        }
+        actions={
+          <>
+            <button onClick={loadAnalytics} className="ep-btn-secondary">
+              <RefreshCw /> Refresh
             </button>
-          </div>
-        </div>
+            <button onClick={exportCsv} disabled={exporting} className="ep-btn-secondary">
+              <Download /> {exporting ? "Exporting…" : "Export CSV"}
+            </button>
+          </>
+        }
+      />
 
-        {/* ── Visual Flashing Scanner Overlays ────────────────────────────── */}
-        {showFlash && result && (
-          <div
-            onClick={() => setShowFlash(false)}
-            className={`fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-md cursor-pointer animate-fade-in ${
-              result.valid
-                ? "bg-emerald-950/90 shadow-[inset_0_0_80px_rgba(16,185,129,0.4)]"
-                : "bg-rose-950/90 shadow-[inset_0_0_80px_rgba(244,63,94,0.4)]"
-            }`}
-          >
-            <div className="text-center space-y-4 max-w-md p-8 glass-card border-white/10 rounded-2xl animate-scale-up">
-              <div className="text-6xl">
-                {result.valid ? "✅" : "❌"}
-              </div>
-              <h2 className="text-3xl font-black text-white uppercase tracking-tight">
-                {result.valid ? "Welcome Access" : "Access Denied"}
-              </h2>
+      {loadError && <Notice tone="danger" title="Couldn't load event stats">{loadError}</Notice>}
 
-              <div className="space-y-1.5 pt-2">
-                {result.valid ? (
-                  <>
-                    <p className="text-2xl font-extrabold text-emerald-400">{result.attendee}</p>
-                    <p className="text-sm font-semibold text-white uppercase tracking-wider">{result.ticketType || "General Ticket"}</p>
-                    {result.checkedInAt && (
-                      <p className="text-xs text-gray-400">
-                        Checked in at {new Date(result.checkedInAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                      </p>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <p className="text-lg font-bold text-rose-400 leading-snug">
-                      {result.reason || "This ticket is already checked in!"}
-                    </p>
-                    {result.attendee && (
-                      <p className="text-xs text-gray-400 mt-1">
-                        Assigned to: <strong>{result.attendee}</strong> ({result.ticketType})
-                      </p>
-                    )}
-                  </>
-                )}
-              </div>
-
-              <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest pt-4">
-                Click anywhere to dismiss
-              </p>
-            </div>
-          </div>
-        )}
-
-        <div className="grid lg:grid-cols-12 gap-8 items-start">
-          
-          {/* Left panel: Code Scan input & Feeds */}
-          <div className="lg:col-span-6 space-y-6">
-            
-            {/* Input card with Live Camera */}
-            <div className="glass-card p-6 rounded-xl border border-white/10 space-y-6">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-white text-sm">Gate Validation</h3>
-                <button 
-                  onClick={() => setUseCamera(!useCamera)} 
-                  className="text-[10px] uppercase font-bold text-violet-400 hover:text-white bg-violet-500/10 px-3 py-1.5 rounded-lg transition-colors"
-                >
-                  {useCamera ? "Switch to Manual" : "Use Camera"}
-                </button>
-              </div>
-
-              {useCamera ? (
-                <div className="space-y-4">
-                  <div className="border-2 border-dashed border-white/10 rounded-xl overflow-hidden bg-black p-2">
-                    <div id="reader" className="w-full"></div>
-                  </div>
-                  <p className="text-[10px] text-center text-emerald-400 font-semibold animate-pulse">
-                    Camera active. Align QR code within the frame to scan.
-                  </p>
-                </div>
-              ) : (
-                <form onSubmit={handleScan} className="flex gap-2">
-                  <input
-                    ref={inputRef}
-                    type="text"
-                    className="ep-input font-mono tracking-widest text-sm uppercase bg-slate-950/60"
-                    placeholder="EP-2026-XXXXXXXXXX"
-                    value={qrInput}
-                    onChange={(e) => setQrInput(e.target.value)}
-                    autoComplete="off"
-                    required
-                  />
-                  <button type="submit" className="ep-btn-primary px-6" disabled={scanning}>
-                    {scanning ? "..." : "Scan"}
-                  </button>
-                </form>
-              )}
-              
-              <p className="text-[10px] text-gray-500 font-semibold leading-normal">
-                {!useCamera && "Type code or autofocus to scan with standard USB barcode scanners."}
-              </p>
-            </div>
-
-            {/* Standard Alert scan status showing inline */}
-            {result && !showFlash && (
-              <div className={`glass-card p-5 rounded-xl border-l-4 ${
-                result.valid ? "border-l-emerald-500 bg-emerald-950/20" : "border-l-rose-500 bg-rose-950/20"
-              }`}>
-                <div className="flex items-start gap-3">
-                  <span className="text-xl">{result.valid ? "✅" : "❌"}</span>
-                  <div>
-                    <h4 className="font-bold text-white text-sm">{result.valid ? result.message : "Invalid Ticket Code"}</h4>
-                    <p className="text-xs text-gray-400 mt-1">
-                      {result.valid ? `${result.attendee} (${result.ticketType})` : result.reason}
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Recent gate check-ins timeline */}
-            {analytics && (
-              <div className="glass-card p-6 rounded-xl border border-white/5 space-y-4">
-                <h3 className="font-bold text-white text-sm">Recent Entries</h3>
-                
-                {analytics.recentCheckIns.length === 0 ? (
-                  <p className="text-xs text-gray-500">No attendees checked in yet.</p>
-                ) : (
-                  <div className="space-y-3">
-                    {analytics.recentCheckIns.map((ci, i) => (
-                      <div key={i} className="flex items-center justify-between text-xs border-b border-white/3 pb-2 last:border-b-0 last:pb-0">
-                        <div>
-                          <span className="font-bold text-white">{ci.attendeeName}</span>
-                          <span className="text-gray-500 text-[10px] ml-2 uppercase font-mono">{ci.ticketType}</span>
-                        </div>
-                        <span className="text-[10px] text-violet-400 font-mono">
-                          {ci.checkedInAt ? new Date(ci.checkedInAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : ""}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-          </div>
-
-          {/* Right panel: Analytics summary */}
-          {analytics && (
-            <div className="lg:col-span-6 space-y-6">
-              
-              {/* Telemetry card grid */}
-              <div className="grid grid-cols-2 gap-3.5">
+      <div className="grid items-start gap-6 lg:grid-cols-12">
+        {/* ── Scanner ─────────────────────────────────────────────── */}
+        <section aria-labelledby="scan-h" className="space-y-4 lg:col-span-5">
+          <div className="ep-panel">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2 id="scan-h" className="text-sm font-medium">Scan ticket</h2>
+              <div role="tablist" aria-label="Scan mode" className="inline-flex rounded-md border border-border p-0.5">
                 {[
-                  { label: "Total Registrations", value: analytics.summary.totalRegistrations },
-                  { label: "Today's Entries", value: analytics.summary.checkedInCount },
-                  { label: "Check-in Ratio", value: `${analytics.summary.checkInRate}%` },
-                  { label: "Gross revenue", value: analytics.summary.totalRevenueFormatted },
-                ].map((s) => (
-                  <div key={s.label} className="glass-card p-4 rounded-xl border border-white/5 shadow-md">
-                    <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">{s.label}</span>
-                    <p className="text-lg font-extrabold text-white mt-1 font-mono">{s.value}</p>
-                  </div>
+                  { cam: false, label: "Manual", Icon: Keyboard },
+                  { cam: true, label: "Camera", Icon: Camera },
+                ].map(({ cam, label, Icon }) => (
+                  <button
+                    key={label}
+                    role="tab"
+                    aria-selected={useCamera === cam}
+                    onClick={() => setUseCamera(cam)}
+                    className={cn(
+                      "inline-flex h-6 items-center gap-1.5 rounded-[4px] px-2 text-[12px] font-medium",
+                      useCamera === cam ? "bg-surface-muted text-fg" : "text-fg-muted hover:text-fg"
+                    )}
+                  >
+                    <Icon aria-hidden className="h-3.5 w-3.5" /> {label}
+                  </button>
                 ))}
               </div>
-
-              {/* Progress bar */}
-              <div className="glass-card p-5 rounded-xl border border-white/5 space-y-3">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-white">Capacity Progress</span>
-                  <span className="font-semibold text-violet-400 font-mono">{analytics.summary.capacityUsed}%</span>
-                </div>
-                <div className="bg-slate-900 border border-slate-950 rounded-full h-2 w-full">
-                  <div
-                    className="bg-gradient-to-r from-violet-600 to-indigo-600 h-2 rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(124,58,237,0.4)]"
-                    style={{ width: `${analytics.summary.capacityUsed}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Ticket tier splits */}
-              <div className="glass-card p-6 rounded-xl border border-white/5 space-y-4">
-                <h3 className="font-bold text-white text-sm">Ticket Category Analytics</h3>
-                
-                <div className="space-y-4">
-                  {analytics.ticketBreakdown.map((tt) => (
-                    <div key={tt.ticketTypeId} className="space-y-1.5">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-bold text-white">{tt.name}</span>
-                        <span className="text-gray-400 font-mono">{tt.sold} / {tt.total} Sold</span>
-                      </div>
-                      <div className="bg-slate-900 border border-slate-950 rounded-full h-1.5 w-full">
-                        <div
-                          className="bg-violet-500 h-1.5 rounded-full"
-                          style={{ width: `${tt.total > 0 ? (tt.sold / tt.total) * 100 : 0}%` }}
-                        />
-                      </div>
-                      <div className="flex justify-between items-center text-[10px] text-gray-500 pt-0.5">
-                        <span>Revenue: {formatPrice(tt.revenue)}</span>
-                        <span className="text-violet-400">{tt.checkedIn} Checked-in</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
             </div>
+
+            <div className="p-4">
+              {useCamera ? (
+                <div className="space-y-2">
+                  <div className="overflow-hidden rounded-md border border-border bg-black">
+                    <div id="reader" className="w-full" />
+                  </div>
+                  <p className="text-[12px] text-fg-muted">Hold the ticket QR inside the frame. Repeat scans within 3 seconds are ignored.</p>
+                </div>
+              ) : (
+                <form onSubmit={handleScan} className="space-y-2">
+                  <label htmlFor="qr" className="ep-label">Ticket code</label>
+                  <div className="flex gap-2">
+                    <input
+                      id="qr"
+                      ref={inputRef}
+                      type="text"
+                      className="ep-input font-mono uppercase tracking-wide"
+                      placeholder="EP-2026-XXXXXXXXXX"
+                      value={qrInput}
+                      onChange={(e) => setQrInput(e.target.value)}
+                      autoComplete="off"
+                      spellCheck={false}
+                      required
+                    />
+                    <button type="submit" className="ep-btn-primary h-9 px-4" disabled={scanning}>
+                      {scanning ? "Checking…" : "Check in"}
+                    </button>
+                  </div>
+                  <p className="ep-hint">Type a code, or keep this field focused and use a USB barcode scanner.</p>
+                </form>
+              )}
+            </div>
+          </div>
+
+          {/* Result of the last scan */}
+          <div aria-live="assertive" aria-atomic="true">
+            {result ? (
+              <div
+                className={cn(
+                  "rounded-lg border-l-4 border border-border px-4 py-4 transition-colors duration-500",
+                  result.valid ? "border-l-success" : "border-l-danger",
+                  showFlash ? (result.valid ? "bg-success-subtle" : "bg-danger-subtle") : "bg-surface"
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  {result.valid ? (
+                    <CheckCircle2 aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-success" />
+                  ) : (
+                    <XCircle aria-hidden className="mt-0.5 h-5 w-5 shrink-0 text-danger" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className={cn("text-base font-semibold", result.valid ? "text-success" : "text-danger")}>
+                      {result.valid ? "Admit" : "Do not admit"}
+                    </p>
+                    {result.valid ? (
+                      <>
+                        <p className="mt-1 truncate text-lg font-medium text-fg">{result.attendee}</p>
+                        <p className="text-[13px] text-fg-muted">
+                          {result.ticketType || "General ticket"}
+                          {result.checkedInAt && <> · checked in <span className="font-mono tabular">{formatTime(result.checkedInAt)}</span></>}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="mt-1 text-[14px] text-fg">{result.reason || "This ticket is already checked in"}</p>
+                        {result.attendee && (
+                          <p className="text-[13px] text-fg-muted">
+                            Assigned to {result.attendee}
+                            {result.ticketType && ` · ${result.ticketType}`}
+                          </p>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {scannedAt && <span className="shrink-0 font-mono text-[11px] text-fg-subtle tabular">{formatTime(scannedAt)}</span>}
+                </div>
+              </div>
+            ) : (
+              <p className="rounded-lg border border-dashed border-border-strong px-4 py-4 text-[13px] text-fg-muted">
+                Scan results appear here.
+              </p>
+            )}
+          </div>
+        </section>
+
+        {/* ── Live stats ──────────────────────────────────────────── */}
+        <section aria-label="Event stats" className="space-y-6 lg:col-span-7">
+          {!analytics && !loadError ? (
+            <div className="space-y-4" aria-busy="true">
+              <div className="ep-skeleton h-[74px]" />
+              <div className="ep-skeleton h-40" />
+            </div>
+          ) : analytics && s && (
+            <>
+              <MetricStrip
+                metrics={[
+                  { label: "Registrations", value: formatNumber(s.totalRegistrations) },
+                  { label: "Checked in", value: formatNumber(s.checkedInCount) },
+                  { label: "Check-in rate", value: `${s.checkInRate}%` },
+                  { label: "Revenue", value: formatAmount(s.totalRevenue) },
+                ]}
+              />
+
+              <div className="space-y-1.5">
+                <div className="flex items-baseline justify-between text-[13px]">
+                  <span className="text-fg-muted">Capacity used</span>
+                  <span className="font-mono text-[12px] tabular">{s.capacityUsed}% of {formatNumber(analytics.event.capacity)}</span>
+                </div>
+                <Meter value={s.capacityUsed} max={100} label="Capacity used" />
+              </div>
+
+              <div className="space-y-2">
+                <h2 className="text-sm font-medium">Ticket tiers</h2>
+                <div className="ep-panel overflow-x-auto">
+                  <table className="ep-table">
+                    <thead>
+                      <tr>
+                        <th>Tier</th>
+                        <th className="num">Price</th>
+                        <th className="num">Sold</th>
+                        <th className="num">Checked in</th>
+                        <th className="num">Revenue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.ticketBreakdown.map((tt) => (
+                        <tr key={tt.ticketTypeId}>
+                          <td className="font-medium">{tt.name}</td>
+                          <td className="num font-mono text-[12px] text-fg-muted">{formatPrice(tt.price)}</td>
+                          <td className="num font-mono text-[12px]">{tt.sold}/{tt.total}</td>
+                          <td className="num font-mono text-[12px]">{tt.checkedIn}</td>
+                          <td className="num font-mono text-[12px]">{formatAmount(tt.revenue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between">
+                  <h2 className="text-sm font-medium">Recent entries</h2>
+                  <span className="text-[12px] text-fg-subtle">Last 10</span>
+                </div>
+                {analytics.recentCheckIns.length === 0 ? (
+                  <p className="rounded-lg border border-dashed border-border-strong px-4 py-4 text-[13px] text-fg-muted">No attendees checked in yet.</p>
+                ) : (
+                  <div className="ep-panel overflow-hidden">
+                    <ActivityLog
+                      showEvent={false}
+                      entries={analytics.recentCheckIns.map((ci, i) => ({
+                        id: `${ci.email}-${i}`,
+                        at: ci.checkedInAt,
+                        kind: "checkin" as const,
+                        attendee: ci.attendeeName,
+                        detail: ci.ticketType,
+                      }))}
+                    />
+                  </div>
+                )}
+              </div>
+            </>
           )}
-
-        </div>
-
+        </section>
       </div>
     </div>
   );
