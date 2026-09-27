@@ -1,115 +1,141 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, FormEvent } from "react";
+import { Menu, Search, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
-import { useState } from "react";
-import { Menu, X } from "lucide-react";
+import { Logo } from "@/components/ui/Logo";
 
+/** Public header. The organizer area (/dashboard) has its own sidebar shell. */
 export default function Navbar() {
   const { user, logout, isOrganizer } = useAuth();
   const pathname = usePathname();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const router = useRouter();
+  // The menu is open "for" a path, so navigating anywhere closes it without an effect.
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const menuOpen = openFor === pathname;
+  const setMenuOpen = (fn: (open: boolean) => boolean) => setOpenFor(fn(menuOpen) ? pathname : null);
+  const [q, setQ] = useState("");
 
-  const navLink = (href: string, label: string) => (
-    <Link
-      href={href}
-      className={cn(
-        "text-xs font-bold uppercase tracking-wider transition-all duration-150 relative py-2 px-1",
-        pathname === href
-          ? "text-violet-400"
-          : "text-gray-400 hover:text-white"
-      )}
-    >
-      {label}
-      {pathname === href && (
-        <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-gradient-to-r from-violet-500 to-fuchsia-500 rounded-full shadow-[0_0_8px_rgba(124,58,237,0.8)]" />
-      )}
-    </Link>
-  );
+  if (pathname.startsWith("/dashboard")) return null;
+
+  const links = [
+    { href: "/events", label: "Events", show: true },
+    { href: "/my-tickets", label: "My tickets", show: !!user },
+    { href: "/dashboard", label: "Dashboard", show: isOrganizer },
+  ].filter((l) => l.show);
+
+  const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
+
+  function onSearch(e: FormEvent) {
+    e.preventDefault();
+    const term = q.trim();
+    router.push(term ? `/events?search=${encodeURIComponent(term)}` : "/events");
+  }
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/5 bg-slate-950/70 backdrop-blur-lg">
-      <div className="mx-auto max-w-6xl px-4 sm:px-6">
-        <div className="flex h-16 items-center justify-between">
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 group">
-            <span className="h-3 w-3 rounded-full bg-gradient-to-tr from-violet-500 to-fuchsia-500 shadow-[0_0_12px_rgba(124,58,237,0.8)] group-hover:scale-110 transition-transform duration-300" />
-            <span className="font-black text-white text-base tracking-widest uppercase font-mono bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-300">
-              EventPulse
-            </span>
-          </Link>
+    <header className="sticky top-0 z-40 border-b border-border bg-surface">
+      <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
+        <Link href="/" className="rounded-sm" aria-label="EventPulse home">
+          <Logo />
+        </Link>
 
-          {/* Desktop nav */}
-          <nav className="hidden md:flex items-center gap-8">
-            {navLink("/events", "Browse events")}
-            {isOrganizer && navLink("/dashboard", "Dashboard")}
-            {user && navLink("/my-tickets", "My tickets")}
-          </nav>
+        <nav aria-label="Main" className="hidden items-center gap-1 md:flex">
+          {links.map((l) => (
+            <Link
+              key={l.href}
+              href={l.href}
+              aria-current={isActive(l.href) ? "page" : undefined}
+              className={cn(
+                "rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors",
+                isActive(l.href) ? "bg-surface-muted text-fg" : "text-fg-muted hover:text-fg"
+              )}
+            >
+              {l.label}
+            </Link>
+          ))}
+        </nav>
 
-          {/* Desktop auth */}
-          <div className="hidden md:flex items-center gap-4">
-            {user ? (
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-gray-400 font-semibold border border-white/5 bg-white/5 px-2.5 py-1 rounded">
-                  {user.name}
-                </span>
-                <button
-                  onClick={logout}
-                  className="text-xs font-bold uppercase tracking-wider text-gray-400 hover:text-white transition-colors cursor-pointer"
-                >
-                  Sign out
-                </button>
-              </div>
-            ) : (
-              <>
-                <Link href="/auth/login" className="text-xs font-bold uppercase tracking-wider text-gray-400 hover:text-white transition-colors">
-                  Sign in
-                </Link>
-                <Link
-                  href="/auth/register"
-                  className="ep-btn-primary text-xs font-bold uppercase tracking-wider px-5 py-2 shadow-[0_0_15px_rgba(124,58,237,0.35)] glow-btn-hover"
-                >
-                  Get started
-                </Link>
-              </>
-            )}
-          </div>
+        <form onSubmit={onSearch} role="search" className="relative ml-auto hidden w-60 lg:block">
+          <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-subtle" />
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search events"
+            aria-label="Search events"
+            className="ep-input h-8 pl-8 text-[13px]"
+          />
+        </form>
 
-          {/* Mobile hamburger */}
-          <button
-            className="md:hidden p-2 text-gray-400 hover:text-white transition-colors"
-            onClick={() => setMenuOpen(!menuOpen)}
-            aria-label="Toggle menu"
-          >
-            {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-          </button>
-        </div>
-
-        {/* Mobile menu */}
-        {menuOpen && (
-          <div className="md:hidden border-t border-white/5 py-4 flex flex-col gap-4 bg-slate-950/95 backdrop-blur-lg">
-            <Link href="/events" className="text-xs font-bold uppercase tracking-wider text-gray-300 hover:text-white px-2" onClick={() => setMenuOpen(false)}>Browse events</Link>
-            {isOrganizer && (
-              <Link href="/dashboard" className="text-xs font-bold uppercase tracking-wider text-gray-300 hover:text-white px-2" onClick={() => setMenuOpen(false)}>Dashboard</Link>
-            )}
-            {user && (
-              <Link href="/my-tickets" className="text-xs font-bold uppercase tracking-wider text-gray-300 hover:text-white px-2" onClick={() => setMenuOpen(false)}>My tickets</Link>
-            )}
-            {user ? (
-              <button onClick={() => { logout(); setMenuOpen(false); }} className="text-left text-xs font-bold uppercase tracking-wider text-gray-400 hover:text-white px-2">
+        <div className="hidden items-center gap-2 md:flex lg:ml-0 ml-auto">
+          {user ? (
+            <>
+              <span className="max-w-[160px] truncate text-[13px] text-fg-muted" title={user.email}>
+                {user.name}
+              </span>
+              <button onClick={logout} className="ep-btn-ghost">
                 Sign out
               </button>
+            </>
+          ) : (
+            <>
+              <Link href="/auth/login" className="ep-btn-ghost">
+                Sign in
+              </Link>
+              <Link href="/auth/register" className="ep-btn-primary">
+                Get started
+              </Link>
+            </>
+          )}
+        </div>
+
+        <button
+          className="ep-btn-ghost ep-btn-icon ml-auto md:hidden"
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-label={menuOpen ? "Close menu" : "Open menu"}
+          aria-expanded={menuOpen}
+          aria-controls="mobile-nav"
+        >
+          {menuOpen ? <X /> : <Menu />}
+        </button>
+      </div>
+
+      {menuOpen && (
+        <div id="mobile-nav" className="border-t border-border bg-surface px-4 pb-4 pt-2 md:hidden">
+          <form onSubmit={onSearch} role="search" className="relative mb-2">
+            <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-subtle" />
+            <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search events" aria-label="Search events" className="ep-input pl-8" />
+          </form>
+          <nav aria-label="Main" className="flex flex-col">
+            {links.map((l) => (
+              <Link
+                key={l.href}
+                href={l.href}
+                aria-current={isActive(l.href) ? "page" : undefined}
+                className={cn("rounded-md px-2 py-2.5 text-sm", isActive(l.href) ? "bg-surface-muted font-medium text-fg" : "text-fg-muted")}
+              >
+                {l.label}
+              </Link>
+            ))}
+          </nav>
+          <div className="mt-2 border-t border-border pt-3">
+            {user ? (
+              <div className="flex items-center justify-between">
+                <span className="truncate text-[13px] text-fg-muted">{user.email}</span>
+                <button onClick={logout} className="ep-btn-secondary">Sign out</button>
+              </div>
             ) : (
-              <div className="flex gap-3 pt-2 px-2 border-t border-white/5">
-                <Link href="/auth/login" className="ep-btn-secondary flex-1 text-center py-2" onClick={() => setMenuOpen(false)}>Sign in</Link>
-                <Link href="/auth/register" className="ep-btn-primary flex-1 text-center py-2" onClick={() => setMenuOpen(false)}>Get started</Link>
+              <div className="grid grid-cols-2 gap-2">
+                <Link href="/auth/login" className="ep-btn-secondary ep-btn-lg">Sign in</Link>
+                <Link href="/auth/register" className="ep-btn-primary ep-btn-lg">Get started</Link>
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </header>
   );
 }
