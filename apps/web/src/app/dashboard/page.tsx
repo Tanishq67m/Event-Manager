@@ -1,325 +1,445 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { events, Event } from "@/lib/api";
+import { ArrowDown, ArrowUp, Download, Plus, ScanLine } from "lucide-react";
+import { toast } from "sonner";
+import { events, bookings, checkin, organizations, ApiError, Event, EventBooking } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { formatDate, formatPrice } from "@/lib/utils";
+import { cn, formatDate, formatAmount, formatNumber, formatRelative, percent } from "@/lib/utils";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { MetricStrip } from "@/components/ui/MetricStrip";
+import { EventStatus } from "@/components/ui/Status";
+import { Meter } from "@/components/ui/Meter";
+import { Notice } from "@/components/ui/Notice";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { DailyBarChart, DayPoint } from "@/components/dashboard/DailyBarChart";
+import { ActivityLog, ActivityEntry } from "@/components/dashboard/ActivityLog";
 
-const statusStyle: Record<string, string> = {
-  PUBLISHED: "ep-badge-green shadow-[0_0_8px_rgba(16,185,129,0.25)]",
-  DRAFT: "ep-badge-gray border-white/10 text-gray-400 bg-white/5",
-  ENDED: "ep-badge-blue border-blue-500/20 text-blue-400 bg-blue-500/10",
-  CANCELLED: "ep-badge-red shadow-[0_0_8px_rgba(244,63,94,0.25)]",
-};
+type Filter = "all" | "upcoming" | "draft" | "past";
+type SortKey = "date" | "title" | "sold" | "revenue";
+
+const DAY = 24 * 60 * 60 * 1000;
+const istDay = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" }); // yyyy-mm-dd
 
 export default function DashboardPage() {
-  const { user, isOrganizer, loading: authLoading } = useAuth();
-  const router = useRouter();
+  const { user, isOrganizer } = useAuth();
   const [data, setData] = useState<Event[]>([]);
+  const [bookingsByEvent, setBookingsByEvent] = useState<Record<string, EventBooking[]>>({});
   const [loading, setLoading] = useState(true);
-  
-  // Interactive graph tab state
-  const [activeChartTab, setActiveChartTab] = useState<"revenue" | "tickets" | "checkins">("revenue");
+  const [error, setError] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "date", dir: "asc" });
+  const [publishing, setPublishing] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [orgName, setOrgName] = useState<string | null>(null);
+  // Reference time for "upcoming", "starts in" and the 14-day window; refreshed on each load.
+  const [now, setNow] = useState(() => Date.now());
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    setNow(Date.now());
+    try {
+      organizations.mine().then((o) => setOrgName(o.name)).catch(() => setOrgName(null));
+      const list = await events.myEvents();
+      setData(list);
+      // Confirmed bookings per non-draft event: real revenue, check-ins and activity.
+      const withSales = list.filter((e) => e.status !== "DRAFT");
+      const results = await Promise.allSettled(withSales.map((e) => bookings.forEvent(e.id)));
+      const map: Record<string, EventBooking[]> = {};
+      results.forEach((r, i) => {
+        if (r.status === "fulfilled") map[withSales[i].id] = r.value;
+      });
+      setBookingsByEvent(map);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not load your events");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!authLoading && !user) { router.push("/auth/login"); return; }
-    if (!authLoading && !isOrganizer) { router.push("/events"); return; }
-    if (user && isOrganizer) {
-      events.myEvents().then(setData).catch(console.error).finally(() => setLoading(false));
+    if (user && isOrganizer) load();
+  }, [user, isOrganizer, load]);
+
+  const stats = useMemo(() => {
+    const all = Object.values(bookingsByEvent).flat();
+    const revenue = all.reduce((s, b) => s + b.totalAmount, 0);
+    const tickets = all.reduce((s, b) => s + b.quantity, 0);
+    const checkedIn = all.filter((b) => b.checkedIn).length;
+    const capacity = data
+      .filter((e) => e.status === "PUBLISHED")
+      .reduce((s, e) => s + e.ticketTypes.reduce((t, tt) => t + tt.totalQuantity, 0), 0);
+    const upcoming = data.filter((e) => e.status === "PUBLISHED" && new Date(e.startsAt).getTime() > now);
+    const drafts = data.filter((e) => e.status === "DRAFT");
+    return { all, revenue, tickets, checkedIn, bookings: all.length, capacity, upcoming, drafts };
+  }, [bookingsByEvent, data, now]);
+
+  const perEvent = useMemo(() => {
+    const m: Record<string, { sold: number; total: number; revenue: number; checkedIn: number; bookings: number }> = {};
+    for (const e of data) {
+      const b = bookingsByEvent[e.id];
+      m[e.id] = {
+        sold: e.ticketTypes.reduce((s, t) => s + t.soldQuantity, 0),
+        total: e.ticketTypes.reduce((s, t) => s + t.totalQuantity, 0),
+        revenue: b ? b.reduce((s, x) => s + x.totalAmount, 0) : 0,
+        checkedIn: b ? b.filter((x) => x.checkedIn).length : 0,
+        bookings: b ? b.length : 0,
+      };
     }
-  }, [user, isOrganizer, authLoading, router]);
+    return m;
+  }, [data, bookingsByEvent]);
 
-  // Calculations
-  const publishedCount = data.filter((e) => e.status === "PUBLISHED").length;
-  const draftCount = data.filter((e) => e.status === "DRAFT").length;
-  
-  const totalRevenue = data.reduce((sum, event) => {
-    return sum + (event.ticketTypes?.reduce((s, t) => s + (t.soldQuantity * t.price), 0) ?? 0);
-  }, 0);
+  // Tickets booked per day, last 14 days (IST), from confirmed bookings.
+  const daily: DayPoint[] = useMemo(() => {
+    const days: DayPoint[] = [];
+    for (let i = 13; i >= 0; i--) days.push({ day: istDay(new Date(now - i * DAY)), value: 0 });
+    const idx = new Map(days.map((d, i) => [d.day, i]));
+    for (const b of stats.all) {
+      const i = idx.get(istDay(new Date(b.createdAt)));
+      if (i !== undefined) days[i].value += b.quantity;
+    }
+    return days;
+  }, [stats.all, now]);
 
-  const totalSoldTickets = data.reduce((sum, event) => {
-    return sum + (event.ticketTypes?.reduce((s, t) => s + t.soldQuantity, 0) ?? 0);
-  }, 0);
+  const attention = useMemo(() => {
+    const items: { id: string; event: Event; text: string; tone: "warning" | "danger" | "neutral" }[] = [];
+    for (const e of data) {
+      const p = perEvent[e.id];
+      const start = new Date(e.startsAt).getTime();
+      if (e.status === "DRAFT") items.push({ id: e.id + "d", event: e, text: "Draft — not visible to attendees", tone: "neutral" });
+      if (e.status !== "PUBLISHED" || start < now) continue;
+      if (p.total > 0 && p.sold >= p.total) items.push({ id: e.id + "s", event: e, text: "Sold out", tone: "danger" });
+      else if (p.total > 0 && p.sold / p.total >= 0.9) items.push({ id: e.id + "a", event: e, text: `${p.total - p.sold} tickets left`, tone: "warning" });
+      if (start - now < 7 * DAY) items.push({ id: e.id + "t", event: e, text: `Starts ${formatRelative(e.startsAt, now)}`, tone: "neutral" });
+    }
+    return items;
+  }, [data, perEvent, now]);
 
-  const totalCapacity = data.reduce((sum, event) => {
-    return sum + (event.ticketTypes?.reduce((s, t) => s + t.totalQuantity, 0) ?? 0);
-  }, 0);
+  const activity: ActivityEntry[] = useMemo(() => {
+    const titleById = Object.fromEntries(data.map((e) => [e.id, e.title]));
+    const out: ActivityEntry[] = [];
+    for (const [eventId, list] of Object.entries(bookingsByEvent)) {
+      for (const b of list) {
+        const detail = `${b.ticketType.name}${b.quantity > 1 ? ` ×${b.quantity}` : ""}`;
+        out.push({ id: b.id + ":b", at: b.createdAt, kind: "booking", attendee: b.user.name, detail, event: titleById[eventId] });
+        if (b.checkedIn && b.checkedInAt)
+          out.push({ id: b.id + ":c", at: b.checkedInAt, kind: "checkin", attendee: b.user.name, detail: b.ticketType.name, event: titleById[eventId] });
+      }
+    }
+    return out.sort((a, b) => +new Date(b.at) - +new Date(a.at)).slice(0, 12);
+  }, [bookingsByEvent, data]);
 
-  if (loading || authLoading) {
-    return (
-      <div className="min-h-screen bg-[#08070d] py-10">
-        <div className="mx-auto max-w-5xl px-4 sm:px-6 space-y-6">
-          <div className="h-8 bg-white/10 rounded w-48 animate-pulse" />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-24 bg-white/5 border border-white/5 rounded-xl animate-pulse" />
-            ))}
-          </div>
-          <div className="h-64 bg-white/5 border border-white/5 rounded-xl animate-pulse" />
-        </div>
-      </div>
-    );
+  const rows = useMemo(() => {
+    const filtered = data.filter((e) => {
+      const past = new Date(e.endsAt).getTime() < now;
+      if (filter === "draft") return e.status === "DRAFT";
+      if (filter === "past") return past || e.status === "ENDED";
+      if (filter === "upcoming") return e.status === "PUBLISHED" && !past;
+      return true;
+    });
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      switch (sort.key) {
+        case "title": return a.title.localeCompare(b.title) * dir;
+        case "sold": return (percent(perEvent[a.id].sold, perEvent[a.id].total) - percent(perEvent[b.id].sold, perEvent[b.id].total)) * dir;
+        case "revenue": return (perEvent[a.id].revenue - perEvent[b.id].revenue) * dir;
+        default: return (+new Date(a.startsAt) - +new Date(b.startsAt)) * dir;
+      }
+    });
+  }, [data, filter, sort, perEvent, now]);
+
+  async function publish(e: Event) {
+    setPublishing(e.id);
+    try {
+      await events.publish(e.id);
+      setData((prev) => prev.map((x) => (x.id === e.id ? { ...x, status: "PUBLISHED" } : x)));
+      toast.success(`Published “${e.title}”`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not publish event");
+    } finally {
+      setPublishing(null);
+    }
   }
 
-  // Simulated chart path telemetry depending on active tab
-  const getChartPath = () => {
-    switch (activeChartTab) {
-      case "revenue":
-        return "M 10 120 Q 80 90 150 110 T 290 50 T 430 80 T 570 30 T 710 40 T 850 10";
-      case "tickets":
-        return "M 10 130 Q 80 120 150 100 T 290 80 T 430 60 T 570 50 T 710 20 T 850 5";
-      case "checkins":
-        return "M 10 140 Q 80 130 150 120 T 290 90 T 430 95 T 570 70 T 710 40 T 850 15";
+  async function exportCsv(e: Event) {
+    setExporting(e.id);
+    try {
+      await checkin.downloadCsv(e.id, `${e.slug}-attendees.csv`);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 204) toast(err.message);
+      else toast.error(err instanceof Error ? err.message : "Export failed");
+    } finally {
+      setExporting(null);
     }
+  }
+
+  const sortHeader = (key: SortKey, label: string, className?: string) => {
+    const on = sort.key === key;
+    return (
+      <th className={className} aria-sort={on ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+        <button
+          type="button"
+          onClick={() => setSort((s) => ({ key, dir: s.key === key && s.dir === "asc" ? "desc" : "asc" }))}
+          className={cn("inline-flex items-center gap-1 uppercase hover:text-fg", on && "text-fg")}
+        >
+          {label}
+          {on && (sort.dir === "asc" ? <ArrowUp aria-hidden className="h-3 w-3" /> : <ArrowDown aria-hidden className="h-3 w-3" />)}
+        </button>
+      </th>
+    );
   };
 
+
   return (
-    <div className="min-h-screen bg-[#08070d] bg-radial-pulse pb-20">
-      <div className="mx-auto max-w-5xl px-4 sm:px-6 py-10 z-10 relative space-y-8">
-        
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-extrabold text-white tracking-tight">Organizer Dashboard</h1>
-            <p className="text-sm text-gray-400 mt-1">Manage events, track tickets, and check-in entries</p>
-          </div>
-          <Link
-            href="/dashboard/events/new"
-            className="ep-btn-primary px-5 py-2.5 shadow-[0_0_15px_rgba(124,58,237,0.4)] glow-btn-hover"
-          >
-            + Create event
+    <div className="space-y-8">
+      <PageHeader
+        title="Overview"
+        description={orgName ? `${orgName} · ${data.length} event${data.length === 1 ? "" : "s"}` : "Your events, sales and check-ins"}
+        actions={
+          <Link href="/dashboard/events/new" className="ep-btn-primary">
+            <Plus /> New event
           </Link>
-        </div>
+        }
+      />
 
-        {/* ── Metric Cards Grid ─────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          
-          {/* Revenue */}
-          <div className="glass-card p-5 rounded-xl shadow-xl flex flex-col justify-between h-28 border border-white/5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-12 h-12 bg-emerald-500/5 rounded-full blur-xl pointer-events-none" />
-            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Revenue</span>
-            <div>
-              <p className="text-2xl font-extrabold text-white font-mono">{formatPrice(totalRevenue)}</p>
-              <p className="text-[10px] text-emerald-400 font-semibold mt-1">100% Secure payouts</p>
-            </div>
-          </div>
+      {error && (
+        <Notice tone="danger" title="Couldn't load the dashboard">
+          {error}{" "}
+          <button onClick={load} className="font-medium text-fg underline underline-offset-2">Retry</button>
+        </Notice>
+      )}
 
-          {/* Tickets Sold */}
-          <div className="glass-card p-5 rounded-xl shadow-xl flex flex-col justify-between h-28 border border-white/5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-12 h-12 bg-violet-500/5 rounded-full blur-xl pointer-events-none" />
-            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Tickets Sold</span>
-            <div>
-              <p className="text-2xl font-extrabold text-white font-mono">{totalSoldTickets} / {totalCapacity}</p>
-              <p className="text-[10px] text-violet-400 font-semibold mt-1">
-                {totalCapacity > 0 ? Math.round((totalSoldTickets / totalCapacity) * 100) : 0}% capacity booked
-              </p>
-            </div>
-          </div>
+      {loading ? (
+        <DashboardSkeleton />
+      ) : !error && data.length === 0 ? (
+        <EmptyState
+          title="No events yet"
+          description="Create an event with one or more ticket tiers. It's published as soon as you finish, and bookings, revenue and check-ins will show up here."
+          action={<Link href="/dashboard/events/new" className="ep-btn-primary"><Plus /> Create your first event</Link>}
+        />
+      ) : !error && (
+        <>
+          <MetricStrip
+            metrics={[
+              { label: "Revenue", value: formatAmount(stats.revenue), detail: "Confirmed bookings" },
+              { label: "Tickets sold", value: formatNumber(stats.tickets), detail: stats.capacity ? `${percent(stats.tickets, stats.capacity)}% of ${formatNumber(stats.capacity)} published` : "No published capacity" },
+              { label: "Checked in", value: `${formatNumber(stats.checkedIn)} / ${formatNumber(stats.bookings)}`, detail: `${percent(stats.checkedIn, stats.bookings)}% of bookings` },
+              { label: "Upcoming events", value: stats.upcoming.length, detail: `${stats.drafts.length} draft${stats.drafts.length === 1 ? "" : "s"}` },
+            ]}
+          />
 
-          {/* Upcoming Events */}
-          <div className="glass-card p-5 rounded-xl shadow-xl flex flex-col justify-between h-28 border border-white/5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-12 h-12 bg-indigo-500/5 rounded-full blur-xl pointer-events-none" />
-            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Active Events</span>
-            <div>
-              <p className="text-2xl font-extrabold text-white font-mono">{publishedCount}</p>
-              <p className="text-[10px] text-gray-500 font-semibold mt-1">{draftCount} drafts in editor</p>
-            </div>
-          </div>
+          <div className="grid gap-6 lg:grid-cols-3">
+            <section aria-labelledby="chart-h" className="ep-panel p-4 lg:col-span-2">
+              <div className="mb-3 flex items-baseline justify-between">
+                <h2 id="chart-h" className="text-sm font-medium">Tickets booked</h2>
+                <span className="text-[12px] text-fg-subtle">Last 14 days · {formatNumber(daily.reduce((s, d) => s + d.value, 0))} total</span>
+              </div>
+              <DailyBarChart data={daily} unit="tickets" />
+            </section>
 
-          {/* Live Check-ins / Today's attendees */}
-          <div className="glass-card p-5 rounded-xl shadow-xl flex flex-col justify-between h-28 border border-white/5 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-12 h-12 bg-fuchsia-500/5 rounded-full blur-xl pointer-events-none" />
-            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Live check-ins</span>
-            <div>
-              <p className="text-2xl font-extrabold text-white font-mono">
-                {totalSoldTickets > 0 ? Math.round(totalSoldTickets * 0.45) : 0}
-              </p>
-              <p className="text-[10px] text-fuchsia-400 font-semibold mt-1">Camera gates scanning active</p>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Interactive SVG Telemetry Chart ───────────────────────────── */}
-        <div className="glass-card rounded-xl p-6 shadow-xl border border-white/10">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <div>
-              <h3 className="font-bold text-white text-base">Performance Analytics</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Simulated daily performance statistics</p>
-            </div>
-            
-            {/* Chart toggle controls */}
-            <div className="flex gap-1.5 bg-slate-950/40 p-1 border border-white/5 rounded-lg shrink-0 select-none">
-              {(["revenue", "tickets", "checkins"] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveChartTab(tab)}
-                  className={`text-[10px] font-bold uppercase px-3 py-1.5 rounded cursor-pointer transition-all ${
-                    activeChartTab === tab
-                      ? "bg-violet-600 text-white shadow-md border border-violet-500/20"
-                      : "text-gray-400 hover:text-white"
-                  }`}
-                >
-                  {tab === "checkins" ? "check-ins" : tab}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* SVG Visual line graph */}
-          <div className="relative h-44 w-full pt-4">
-            <svg className="w-full h-full" viewBox="0 0 850 150" fill="none" preserveAspectRatio="none">
-              {/* Horizontal grid lines */}
-              <line x1="0" y1="30" x2="850" y2="30" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
-              <line x1="0" y1="70" x2="850" y2="70" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
-              <line x1="0" y1="110" x2="850" y2="110" stroke="rgba(255,255,255,0.03)" strokeWidth="1" />
-
-              {/* Bouncing line gradient definition */}
-              <defs>
-                <linearGradient id="chart-glow" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#7c3aed" stopOpacity="0.45" />
-                  <stop offset="100%" stopColor="#7c3aed" stopOpacity="0.0" />
-                </linearGradient>
-              </defs>
-
-              {/* Filled area */}
-              <path
-                d={`${getChartPath()} L 850 150 L 10 150 Z`}
-                fill="url(#chart-glow)"
-                className="transition-all duration-500"
-              />
-
-              {/* Smooth vector path */}
-              <path
-                d={getChartPath()}
-                stroke="#a78bfa"
-                strokeWidth="3.5"
-                strokeLinecap="round"
-                className="transition-all duration-500"
-              />
-
-              {/* Glowing endpoint dots */}
-              <circle cx="850" cy={activeChartTab === "revenue" ? 10 : activeChartTab === "tickets" ? 5 : 15} r="5" fill="#a78bfa" className="animate-ping" />
-              <circle cx="850" cy={activeChartTab === "revenue" ? 10 : activeChartTab === "tickets" ? 5 : 15} r="4" fill="#ffffff" />
-            </svg>
-          </div>
-          
-          <div className="flex justify-between items-center text-[10px] text-gray-500 font-mono mt-4 pt-3 border-t border-white/5">
-            <span>MON 01</span>
-            <span>WED 03</span>
-            <span>FRI 05</span>
-            <span>TODAY (SUN 07)</span>
-          </div>
-        </div>
-
-        {/* ── Events List ────────────────────────────────────────────────── */}
-        <div className="space-y-4">
-          <h2 className="font-bold text-white text-lg tracking-tight">Your Hosted Events</h2>
-
-          {data.length === 0 ? (
-            <div className="glass-card rounded-xl p-12 text-center border border-white/5 shadow-xl">
-              <p className="text-5xl mb-4">🎯</p>
-              <h3 className="text-xl font-bold text-white mb-2">No hosted events yet</h3>
-              <p className="text-sm text-gray-400 max-w-sm mx-auto mb-6">
-                Create a draft event to define ticketing details, write tags, and start distributing passes.
-              </p>
-              <Link href="/dashboard/events/new" className="ep-btn-primary px-6 py-2.5">
-                Create First Event
-              </Link>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {data.map((event) => {
-                const totalSold = event.ticketTypes?.reduce((s, t) => s + t.soldQuantity, 0) ?? 0;
-                const revenue = event.ticketTypes?.reduce((s, t) => s + (t.soldQuantity * t.price), 0) ?? 0;
-                const pct = event.capacity > 0 ? Math.round((totalSold / event.capacity) * 100) : 0;
-
-                return (
-                  <div key={event.id} className="glass-card p-5 rounded-xl border border-white/5 hover:border-white/10 transition-all shadow-lg flex flex-col justify-between">
-                    
-                    <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-                      
-                      <div className="flex-1 min-w-0 space-y-2">
-                        <div className="flex items-center gap-2.5 flex-wrap">
-                          <span className={statusStyle[event.status] || "ep-badge-gray"}>
-                            {event.status}
-                          </span>
-                          <span className="text-xs text-gray-400 font-semibold">{formatDate(event.startsAt)}</span>
-                        </div>
-                        
-                        <h3 className="text-lg font-bold text-white truncate hover:text-violet-400 transition-colors">
-                          {event.title}
-                        </h3>
-                        <p className="text-xs text-gray-400 flex items-center gap-1.5">
-                          <span className="text-violet-400">📍</span>
-                          {event.venue}
-                        </p>
-
-                        {/* Capacity progress bar */}
-                        <div className="pt-2 max-w-md">
-                          <div className="flex items-center justify-between text-[10px] text-gray-400 mb-1">
-                            <span>Capacity Used</span>
-                            <span className="font-mono">{pct}% ({totalSold} / {event.capacity} registered)</span>
-                          </div>
-                          <div className="bg-slate-900 border border-slate-950 rounded-full h-2 w-full">
-                            <div
-                              className="bg-gradient-to-r from-violet-600 to-indigo-600 h-2 rounded-full transition-all shadow-[0_0_8px_rgba(124,58,237,0.4)]"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
+            <section aria-labelledby="attn-h" className="ep-panel flex flex-col">
+              <div className="flex items-baseline justify-between border-b border-border px-4 py-3">
+                <h2 id="attn-h" className="text-sm font-medium">Needs attention</h2>
+                <span className="text-[12px] text-fg-subtle tabular">{attention.length}</span>
+              </div>
+              {attention.length === 0 ? (
+                <p className="px-4 py-6 text-[13px] text-fg-muted">Nothing right now. Drafts, events close to selling out and events starting this week show up here.</p>
+              ) : (
+                <ul className="divide-y divide-border overflow-y-auto lg:max-h-[216px]">
+                  {attention.map((a) => (
+                    <li key={a.id} className="flex items-center gap-3 px-4 py-2.5">
+                      <span
+                        aria-hidden
+                        className={cn("h-1.5 w-1.5 shrink-0 rounded-full", a.tone === "danger" ? "bg-danger" : a.tone === "warning" ? "bg-warning" : "bg-fg-subtle")}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] text-fg">{a.event.title}</p>
+                        <p className="text-[12px] text-fg-muted">{a.text}</p>
                       </div>
-
-                      <div className="text-left sm:text-right shrink-0">
-                        <p className="text-xs text-gray-500 uppercase tracking-widest font-bold">REVENUE GENERATED</p>
-                        <p className="text-2xl font-extrabold text-white mt-1 font-mono">{formatPrice(revenue)}</p>
-                      </div>
-                    </div>
-
-                    {/* Actions panel */}
-                    <div className="flex flex-wrap gap-2.5 mt-5 pt-4 border-t border-white/5">
-                      {event.status === "PUBLISHED" && (
-                        <Link
-                          href={`/dashboard/events/${event.id}/checkin`}
-                          className="ep-btn-primary text-xs py-2 px-4 shadow-[0_0_10px_rgba(124,58,237,0.3)]"
-                        >
-                          Check-in Gate
-                        </Link>
-                      )}
-                      {event.status === "DRAFT" && (
-                        <button
-                          onClick={async () => {
-                            await events.publish(event.id);
-                            setData((prev) => prev.map((e) => e.id === event.id ? { ...e, status: "PUBLISHED" } : e));
-                          }}
-                          className="ep-btn-primary text-xs py-2 px-4 shadow-[0_0_10px_rgba(124,58,237,0.3)] cursor-pointer"
-                        >
-                          Publish Event
+                      {a.event.status === "DRAFT" ? (
+                        <button onClick={() => publish(a.event)} disabled={publishing === a.event.id} className="ep-btn-secondary ep-btn-sm">
+                          {publishing === a.event.id ? "Publishing…" : "Publish"}
                         </button>
+                      ) : (
+                        <Link href={`/events/${a.event.slug}`} className="ep-btn-ghost ep-btn-sm">View</Link>
                       )}
-                      <Link href={`/events/${event.slug}`} className="ep-btn-secondary text-xs py-2 px-4">
-                        View Page
-                      </Link>
-                      <a
-                        href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:5001/api"}/checkin/export/${event.id}`}
-                        className="ep-btn-ghost text-xs py-2 px-4 hover:text-white"
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Export Attendee CSV
-                      </a>
-                    </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </div>
 
-                  </div>
-                );
-              })}
+          <section aria-labelledby="events-h" className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="events-h" className="text-sm font-medium">Events</h2>
+              <div role="tablist" aria-label="Filter events" className="inline-flex rounded-md border border-border bg-surface p-0.5">
+                {(["all", "upcoming", "draft", "past"] as Filter[]).map((f) => (
+                  <button
+                    key={f}
+                    role="tab"
+                    aria-selected={filter === f}
+                    onClick={() => setFilter(f)}
+                    className={cn(
+                      "h-7 rounded-[4px] px-2.5 text-[12px] font-medium capitalize transition-colors",
+                      filter === f ? "bg-surface-muted text-fg" : "text-fg-muted hover:text-fg"
+                    )}
+                  >
+                    {f === "draft" ? "Drafts" : f}
+                  </button>
+                ))}
+              </div>
             </div>
-          )}
-        </div>
 
+            {rows.length === 0 ? (
+              <EmptyState title="No events match this filter" description="Try another filter above." />
+            ) : (
+              <>
+                {/* Desktop / tablet: table */}
+                <div className="ep-panel hidden overflow-x-auto md:block">
+                  <table className="ep-table">
+                    <thead>
+                      <tr>
+                        {sortHeader("title", "Event")}
+                        <th>Status</th>
+                        {sortHeader("date", "Date")}
+                        {sortHeader("sold", "Sold", "w-44")}
+                        <th className="num">Checked in</th>
+                        {sortHeader("revenue", "Revenue", "num")}
+                        <th className="w-px"><span className="sr-only">Actions</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((e) => {
+                        const p = perEvent[e.id];
+                        return (
+                          <tr key={e.id}>
+                            <td className="max-w-[260px]">
+                              <Link href={`/events/${e.slug}`} className="block truncate font-medium text-fg hover:underline underline-offset-2">
+                                {e.title}
+                              </Link>
+                              <span className="block truncate text-[12px] text-fg-muted">{e.venue}</span>
+                            </td>
+                            <td><EventStatus status={e.status} /></td>
+                            <td className="whitespace-nowrap tabular text-fg-muted">{formatDate(e.startsAt)}</td>
+                            <td>
+                              <div className="flex items-center gap-2.5">
+                                <Meter value={p.sold} max={p.total} className="w-20" label={`${e.title} tickets sold`} />
+                                <span className="whitespace-nowrap font-mono text-[12px] text-fg-muted tabular">
+                                  {p.sold}/{p.total}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="num font-mono text-[12px] text-fg-muted">{e.status === "DRAFT" ? "—" : `${p.checkedIn}/${p.bookings}`}</td>
+                            <td className="num font-mono text-[12px]">{e.status === "DRAFT" ? "—" : formatAmount(p.revenue)}</td>
+                            <td>
+                              <RowActions e={e} publishing={publishing} exporting={exporting} onPublish={publish} onExport={exportCsv} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Mobile: stacked rows */}
+                <ul className="ep-panel divide-y divide-border md:hidden">
+                  {rows.map((e) => {
+                    const p = perEvent[e.id];
+                    return (
+                      <li key={e.id} className="space-y-2 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <Link href={`/events/${e.slug}`} className="block truncate text-sm font-medium">{e.title}</Link>
+                            <p className="text-[12px] text-fg-muted">{formatDate(e.startsAt)} · {e.venue}</p>
+                          </div>
+                          <EventStatus status={e.status} />
+                        </div>
+                        <div className="flex items-center gap-2.5">
+                          <Meter value={p.sold} max={p.total} className="flex-1" label={`${e.title} tickets sold`} />
+                          <span className="font-mono text-[12px] text-fg-muted">{p.sold}/{p.total}</span>
+                          {e.status !== "DRAFT" && <span className="font-mono text-[12px]">{formatAmount(p.revenue)}</span>}
+                        </div>
+                        <RowActions e={e} publishing={publishing} exporting={exporting} onPublish={publish} onExport={exportCsv} mobile />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </>
+            )}
+          </section>
+
+          <section aria-labelledby="activity-h" className="space-y-3">
+            <div className="flex items-baseline justify-between">
+              <h2 id="activity-h" className="text-sm font-medium">Recent activity</h2>
+              <span className="text-[12px] text-fg-subtle">Bookings and check-ins across your events</span>
+            </div>
+            {activity.length === 0 ? (
+              <EmptyState title="No activity yet" description="Confirmed bookings and gate check-ins will be logged here as they happen." />
+            ) : (
+              <div className="ep-panel overflow-hidden">
+                <ActivityLog entries={activity} />
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RowActions({
+  e,
+  publishing,
+  exporting,
+  onPublish,
+  onExport,
+  mobile,
+}: {
+  e: Event;
+  publishing: string | null;
+  exporting: string | null;
+  onPublish: (e: Event) => void;
+  onExport: (e: Event) => void;
+  mobile?: boolean;
+}) {
+  return (
+    <div className={cn("flex items-center gap-1.5", mobile ? "flex-wrap" : "justify-end")}>
+      {e.status === "DRAFT" && (
+        <button onClick={() => onPublish(e)} disabled={publishing === e.id} className="ep-btn-primary ep-btn-sm">
+          {publishing === e.id ? "Publishing…" : "Publish"}
+        </button>
+      )}
+      {e.status === "PUBLISHED" && (
+        <Link href={`/dashboard/events/${e.id}/checkin`} className="ep-btn-secondary ep-btn-sm">
+          <ScanLine /> Check-in
+        </Link>
+      )}
+      <button
+        onClick={() => onExport(e)}
+        disabled={exporting === e.id}
+        className="ep-btn-ghost ep-btn-sm"
+        aria-label={`Export attendee CSV for ${e.title}`}
+        title="Export attendee CSV"
+      >
+        <Download />
+        {mobile && "CSV"}
+      </button>
+    </div>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-6" aria-busy="true" aria-label="Loading dashboard">
+      <div className="ep-skeleton h-[74px]" />
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="ep-skeleton h-[212px] lg:col-span-2" />
+        <div className="ep-skeleton h-[212px]" />
       </div>
+      <div className="ep-skeleton h-64" />
     </div>
   );
 }

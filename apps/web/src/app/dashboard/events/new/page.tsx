@@ -1,103 +1,81 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
-import { 
-  Info, 
-  MapPin, 
-  Ticket, 
-  Image as ImageIcon, 
-  Send,
-  ChevronRight,
-  ChevronLeft,
-  CheckCircle2,
-  AlertCircle
-} from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { events } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
-import { formatDateTime, formatPrice } from "@/lib/utils";
+import { cn, formatAmount, formatNumber, formatPrice, formatSchedule } from "@/lib/utils";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Notice } from "@/components/ui/Notice";
 
 interface TicketTypeInput {
   name: string;
   description: string;
   price: string;
   totalQuantity: string;
-  inviteOnly: boolean;
-  color: string;
 }
 
-const emptyTicket = (): TicketTypeInput => ({
-  name: "",
-  description: "",
-  price: "0",
-  totalQuantity: "50",
-  inviteOnly: false,
-  color: "violet"
-});
+const emptyTicket = (): TicketTypeInput => ({ name: "", description: "", price: "0", totalQuantity: "50" });
 
-const TICKET_COLORS: Record<string, string> = {
-  violet: "bg-violet-600 text-white border-violet-500",
-  emerald: "bg-emerald-600 text-white border-emerald-500",
-  amber: "bg-amber-600 text-white border-amber-500",
-  rose: "bg-rose-600 text-white border-rose-500",
-  cyan: "bg-cyan-600 text-white border-cyan-500"
-};
+type Errors = Partial<Record<"title" | "description" | "venue" | "startsAt" | "endsAt" | "capacity" | "tickets", string>>;
 
-const PRESET_BANNERS = [
-  "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=800&q=80",
-  "https://images.unsplash.com/photo-1506157786151-b8491531f063?auto=format&fit=crop&w=800&q=80"
-];
+/** Mirrors the API's createEventSchema so problems show inline instead of as one generic error. */
+function validate(v: { title: string; description: string; venue: string; startsAt: string; endsAt: string; capacity: string; ticketTypes: TicketTypeInput[] }): Errors {
+  const e: Errors = {};
+  if (v.title.trim().length < 3) e.title = "At least 3 characters.";
+  if (v.description.trim().length < 10) e.description = "At least 10 characters.";
+  if (v.venue.trim().length < 3) e.venue = "Where is it happening?";
+  if (!v.startsAt) e.startsAt = "Pick a start time.";
+  if (!v.endsAt) e.endsAt = "Pick an end time.";
+  if (v.startsAt && v.endsAt && new Date(v.endsAt) <= new Date(v.startsAt)) e.endsAt = "Must be after the start.";
+  if (!(parseInt(v.capacity) >= 1)) e.capacity = "At least 1.";
+  if (v.ticketTypes.some((t) => !t.name.trim() || !(parseInt(t.totalQuantity) >= 1) || parseFloat(t.price || "0") < 0))
+    e.tickets = "Every tier needs a name, a quantity of at least 1, and a price of 0 or more.";
+  return e;
+}
 
-const WIZARD_STEPS = [
-  { id: "basic", label: "Basic Info", icon: Info },
-  { id: "banner", label: "Banner", icon: ImageIcon },
-  { id: "venue", label: "Venue & Time", icon: MapPin },
-  { id: "tickets", label: "Tickets", icon: Ticket },
-  { id: "review", label: "Review & Publish", icon: Send }
-];
-
-export default function EventWizardPage() {
+export default function NewEventPage() {
   const { user } = useAuth();
   const router = useRouter();
 
-  const [currentStep, setCurrentStep] = useState(0);
-
-  // Form state
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("Concerts");
-  const [tags, setTags] = useState("");
-  
   const [venue, setVenue] = useState("");
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [capacity, setCapacity] = useState("100");
-  
-  const [bannerUrl, setBannerUrl] = useState(PRESET_BANNERS[0]);
-  
   const [ticketTypes, setTicketTypes] = useState<TicketTypeInput[]>([
-    { name: "General Admission", description: "Standard pass", price: "0", totalQuantity: "100", inviteOnly: false, color: "violet" }
+    { name: "General Admission", description: "Standard pass", price: "0", totalQuantity: "100" },
   ]);
-  
-  const [loading, setLoading] = useState(false);
 
-  function updateTicket(i: number, field: keyof TicketTypeInput, value: any) {
-    setTicketTypes((prev) => prev.map((t, idx) => idx === i ? { ...t, [field]: value } : t));
+  const [errors, setErrors] = useState<Errors>({});
+  const [submitError, setSubmitError] = useState("");
+  const [loading, setLoading] = useState<"publish" | "draft" | null>(null);
+
+  function updateTicket(i: number, field: keyof TicketTypeInput, value: string) {
+    setTicketTypes((prev) => prev.map((t, idx) => (idx === i ? { ...t, [field]: value } : t)));
   }
-  function addTicket() { setTicketTypes((prev) => [...prev, emptyTicket()]); }
+  function addTicket() {
+    setTicketTypes((prev) => [...prev, emptyTicket()]);
+  }
   function removeTicket(i: number) {
     if (ticketTypes.length === 1) return;
     setTicketTypes((prev) => prev.filter((_, idx) => idx !== i));
   }
 
-  async function handleSubmit(e?: FormEvent) {
-    if (e) e.preventDefault();
+  async function handleSubmit(e: { preventDefault(): void }, publish = true) {
+    e.preventDefault();
     if (!user) return;
-    setLoading(true);
+    const found = validate({ title, description, venue, startsAt, endsAt, capacity, ticketTypes });
+    setErrors(found);
+    setSubmitError("");
+    if (Object.keys(found).length) {
+      document.querySelector<HTMLElement>("[aria-invalid='true']")?.focus();
+      return;
+    }
+    setLoading(publish ? "publish" : "draft");
 
     try {
       const event = await events.create({
@@ -114,292 +92,214 @@ export default function EventWizardPage() {
           totalQuantity: parseInt(t.totalQuantity || "50"),
         })),
       });
-      // Optionally publish immediately
-      await events.publish(event.id);
-      
-      toast.success("Event created successfully!");
+      if (publish) await events.publish(event.id);
+
+      toast.success(publish ? "Event published" : "Draft saved");
       router.push(`/dashboard?created=${event.id}`);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Failed to create event");
+      setSubmitError(err instanceof Error ? err.message : "Failed to create event");
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   }
 
-  const nextStep = () => setCurrentStep(prev => Math.min(WIZARD_STEPS.length - 1, prev + 1));
-  const prevStep = () => setCurrentStep(prev => Math.max(0, prev - 1));
+  const totalTickets = ticketTypes.reduce((s, t) => s + (parseInt(t.totalQuantity) || 0), 0);
+  const potential = ticketTypes.reduce((s, t) => s + Math.round(parseFloat(t.price || "0") * 100) * (parseInt(t.totalQuantity) || 0), 0);
+  const overCapacity = totalTickets > (parseInt(capacity) || 0);
 
-  // Step renderers
-  const renderBasicInfo = () => (
-    <div className="space-y-6">
-      <div>
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Event Title</label>
-        <input
-          type="text"
-          className="w-full text-3xl font-black bg-transparent text-white border-b border-white/10 focus:outline-none focus:border-violet-500 focus:ring-0 placeholder:text-gray-600 px-0 pb-3 transition-colors"
-          placeholder="Give it a catchy name..."
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-      </div>
-      <div>
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Description</label>
-        <div className="glass-card rounded-xl border border-white/5 p-1">
-          <textarea
-            className="w-full min-h-[160px] bg-transparent text-sm text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-0 border-0 resize-none px-3 py-3 leading-relaxed"
-            placeholder="What is this event about? (Supports markdown)"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </div>
-      </div>
-      <div className="grid sm:grid-cols-2 gap-6">
-        <div>
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Category</label>
-          <select className="ep-input w-full" value={category} onChange={(e) => setCategory(e.target.value)}>
-            {["Concerts", "Festivals", "Tech & Startups", "Sports", "Comedy", "College Fests"].map((cat) => (
-              <option key={cat} value={cat} className="bg-slate-950 text-white">{cat}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Tags</label>
-          <input type="text" className="ep-input w-full" placeholder="e.g. music, live, indie" value={tags} onChange={(e) => setTags(e.target.value)} />
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderBanner = () => (
-    <div className="space-y-6">
-      <div>
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-4">Select Banner Theme</label>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {PRESET_BANNERS.map((url, idx) => (
-            <button
-              key={idx}
-              onClick={() => setBannerUrl(url)}
-              className={`relative h-24 rounded-xl overflow-hidden border-2 cursor-pointer transition-all duration-300 ${
-                bannerUrl === url ? "border-violet-500 scale-95 shadow-[0_0_15px_#7c3aed]" : "border-transparent hover:border-white/20"
-              }`}
-            >
-              <img src={url} alt="preset banner" className="w-full h-full object-cover" />
-              {bannerUrl === url && (
-                <div className="absolute inset-0 bg-violet-600/20 flex items-center justify-center">
-                  <CheckCircle2 className="h-6 w-6 text-white" />
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="glass-card rounded-xl p-6 border border-white/5 border-dashed text-center mt-6">
-        <ImageIcon className="h-8 w-8 text-gray-500 mx-auto mb-2" />
-        <p className="text-sm text-gray-300 font-medium">Custom Image Upload</p>
-        <p className="text-xs text-gray-500 mt-1 mb-4">Upload your own 16:9 banner (max 5MB)</p>
-        <button className="ep-btn-secondary py-2 text-xs">Choose File</button>
-      </div>
-    </div>
-  );
-
-  const renderVenue = () => (
-    <div className="space-y-6">
-      <div>
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Venue Location</label>
-        <div className="relative">
-          <MapPin className="absolute left-3 top-3 h-5 w-5 text-gray-500" />
-          <input type="text" className="ep-input pl-10" placeholder="e.g. Madison Square Garden, NY" value={venue} onChange={(e) => setVenue(e.target.value)} />
-        </div>
-      </div>
-      <div className="grid sm:grid-cols-2 gap-6">
-        <div>
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Starts At</label>
-          <input type="datetime-local" className="ep-input font-mono" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} />
-        </div>
-        <div>
-          <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Ends At</label>
-          <input type="datetime-local" className="ep-input font-mono" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} />
-        </div>
-      </div>
-      <div>
-        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest block mb-2">Total Venue Capacity</label>
-        <input type="number" className="ep-input max-w-[200px]" min="1" value={capacity} onChange={(e) => setCapacity(e.target.value)} />
-      </div>
-    </div>
-  );
-
-  const renderTickets = () => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-sm text-gray-400">Configure the pricing tiers for your event attendees.</p>
-        <button onClick={addTicket} className="text-xs font-bold text-violet-400 hover:text-white bg-violet-500/10 hover:bg-violet-500/20 px-3 py-1.5 rounded-lg transition-colors">
-          + Add Tier
-        </button>
-      </div>
-
-      {ticketTypes.map((tt, i) => (
-        <div key={i} className="glass-card rounded-2xl p-5 border border-white/5 space-y-4 relative overflow-hidden group">
-          <div style={{ backgroundColor: tt.color === "violet" ? "#7c3aed" : tt.color === "emerald" ? "#10b981" : tt.color === "amber" ? "#f59e0b" : tt.color === "rose" ? "#f43f5e" : "#06b6d4" }} className="absolute left-0 top-0 bottom-0 w-1" />
-          
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-white bg-white/10 px-2 py-1 rounded">Tier {i + 1}</span>
-            {ticketTypes.length > 1 && (
-              <button onClick={() => removeTicket(i)} className="text-[10px] uppercase font-bold text-rose-400 hover:text-rose-500">Remove</button>
-            )}
-          </div>
-
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Tier Name</label>
-              <input className="ep-input text-sm py-2" placeholder="e.g. VIP Pass" value={tt.name} onChange={(e) => updateTicket(i, "name", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Price (₹)</label>
-              <input type="number" className="ep-input text-sm py-2 font-mono" placeholder="0 for Free" value={tt.price} onChange={(e) => updateTicket(i, "price", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Quantity Limit</label>
-              <input type="number" className="ep-input text-sm py-2 font-mono" value={tt.totalQuantity} onChange={(e) => updateTicket(i, "totalQuantity", e.target.value)} />
-            </div>
-            <div>
-              <label className="text-[10px] text-gray-500 uppercase font-bold mb-1 block">Short Description</label>
-              <input className="ep-input text-sm py-2" placeholder="e.g. Front row seating" value={tt.description} onChange={(e) => updateTicket(i, "description", e.target.value)} />
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-
-  const renderReview = () => (
-    <div className="space-y-6">
-      <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 flex items-start gap-3">
-        <CheckCircle2 className="h-5 w-5 text-emerald-400 shrink-0 mt-0.5" />
-        <div>
-          <h4 className="text-sm font-bold text-emerald-400">Ready to Publish</h4>
-          <p className="text-xs text-emerald-500/80 mt-1">Your event looks great! Once published, your public page will be live and tickets will be available for purchase immediately.</p>
-        </div>
-      </div>
-
-      <div className="glass-card rounded-2xl p-6 border border-white/5 space-y-4">
-        <h3 className="text-xl font-bold text-white border-b border-white/5 pb-3 mb-4">{title || "Untitled Event"}</h3>
-        
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          <div>
-            <span className="block text-gray-500 text-xs font-bold uppercase tracking-widest mb-1">Venue</span>
-            <span className="text-white">{venue || "Not set"}</span>
-          </div>
-          <div>
-            <span className="block text-gray-500 text-xs font-bold uppercase tracking-widest mb-1">Timing</span>
-            <span className="text-white">{startsAt ? formatDateTime(startsAt) : "Not set"}</span>
-          </div>
-        </div>
-
-        <div className="pt-4 border-t border-white/5">
-          <span className="block text-gray-500 text-xs font-bold uppercase tracking-widest mb-3">Ticketing</span>
-          <div className="space-y-2">
-            {ticketTypes.map((t, idx) => (
-              <div key={idx} className="flex justify-between items-center text-sm bg-white/5 p-2 rounded">
-                <span className="text-gray-300">{t.name || "Unnamed Tier"} <span className="text-xs text-gray-500">x{t.totalQuantity}</span></span>
-                <span className="font-bold text-violet-400">{t.price === "0" ? "Free" : `₹${t.price}`}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  const field = (id: keyof Errors) => ({
+    "aria-invalid": errors[id] ? ("true" as const) : undefined,
+    "aria-describedby": errors[id] ? `${id}-err` : undefined,
+  });
+  const err = (id: keyof Errors) =>
+    errors[id] && (
+      <p id={`${id}-err`} className="mt-1.5 text-[12px] text-danger">
+        {errors[id]}
+      </p>
+    );
 
   return (
-    <div className="min-h-screen bg-[#08070d] bg-radial-pulse">
-      
-      {/* Wizard Header */}
-      <header className="sticky top-0 z-40 bg-slate-950/80 backdrop-blur-md border-b border-white/5">
-        <div className="mx-auto max-w-4xl px-4 h-16 flex items-center justify-between">
-          <h1 className="text-white font-bold tracking-tight">Create New Event</h1>
-          <button onClick={() => router.push('/dashboard')} className="text-xs text-gray-400 hover:text-white">Cancel</button>
-        </div>
-      </header>
+    <form onSubmit={(e) => handleSubmit(e, true)} noValidate className="space-y-6">
+      <PageHeader
+        back={{ href: "/dashboard", label: "Overview" }}
+        title="New event"
+        description="Publishing makes the event page public and opens ticket sales immediately."
+      />
 
-      <div className="mx-auto max-w-4xl px-4 py-12 flex flex-col md:flex-row gap-10 items-start">
-        
-        {/* Sidebar Stepper */}
-        <div className="w-full md:w-64 shrink-0 space-y-2">
-          {WIZARD_STEPS.map((step, idx) => {
-            const Icon = step.icon;
-            const isActive = currentStep === idx;
-            const isPast = currentStep > idx;
-            
-            return (
-              <div 
-                key={step.id}
-                className={`flex items-center gap-3 p-3 rounded-xl transition-colors ${isActive ? 'bg-violet-600/10 border border-violet-500/20' : 'border border-transparent'}`}
-              >
-                <div className={`h-8 w-8 rounded-full flex items-center justify-center border transition-colors ${isActive ? 'bg-violet-600 text-white border-violet-500 shadow-[0_0_10px_rgba(124,58,237,0.3)]' : isPast ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-white/10 text-gray-500'}`}>
-                  {isPast ? <CheckCircle2 className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+      <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="min-w-0 divide-y divide-border">
+          {/* Details */}
+          <fieldset className="grid min-w-0 grid-cols-1 gap-4 pb-8 md:grid-cols-[180px_minmax(0,1fr)]">
+            <legend className="sr-only">Details</legend>
+            <div>
+              <h2 className="text-sm font-medium">Details</h2>
+              <p className="mt-1 text-[12px] text-fg-muted">Shown at the top of the public event page.</p>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="title" className="ep-label">Title</label>
+                <input id="title" className="ep-input" placeholder="e.g. Pune JS Meetup #43" value={title} onChange={(e) => setTitle(e.target.value)} {...field("title")} />
+                {err("title")}
+              </div>
+              <div>
+                <label htmlFor="description" className="ep-label">Description</label>
+                <textarea
+                  id="description"
+                  className="ep-textarea min-h-[140px]"
+                  placeholder="What happens at this event, who it's for, what to bring."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  {...field("description")}
+                />
+                {err("description") || <p className="ep-hint">Line breaks are kept as written.</p>}
+              </div>
+            </div>
+          </fieldset>
+
+          {/* Venue & time */}
+          <fieldset className="grid min-w-0 grid-cols-1 gap-4 py-8 md:grid-cols-[180px_minmax(0,1fr)]">
+            <legend className="sr-only">Venue and time</legend>
+            <div>
+              <h2 className="text-sm font-medium">Venue &amp; time</h2>
+              <p className="mt-1 text-[12px] text-fg-muted">Times are in your local timezone.</p>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="venue" className="ep-label">Venue</label>
+                <input id="venue" className="ep-input" placeholder="e.g. Thoughtworks, Yerwada, Pune" value={venue} onChange={(e) => setVenue(e.target.value)} {...field("venue")} />
+                {err("venue")}
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="startsAt" className="ep-label">Starts</label>
+                  <input id="startsAt" type="datetime-local" className="ep-input font-mono text-[13px]" value={startsAt} onChange={(e) => setStartsAt(e.target.value)} {...field("startsAt")} />
+                  {err("startsAt")}
                 </div>
                 <div>
-                  <span className={`text-xs font-bold uppercase tracking-wider block ${isActive ? 'text-violet-400' : isPast ? 'text-emerald-400' : 'text-gray-500'}`}>Step {idx + 1}</span>
-                  <span className={`text-sm font-semibold ${isActive || isPast ? 'text-white' : 'text-gray-400'}`}>{step.label}</span>
+                  <label htmlFor="endsAt" className="ep-label">Ends</label>
+                  <input id="endsAt" type="datetime-local" className="ep-input font-mono text-[13px]" value={endsAt} onChange={(e) => setEndsAt(e.target.value)} {...field("endsAt")} />
+                  {err("endsAt")}
                 </div>
               </div>
-            );
-          })}
+              <div className="max-w-[200px]">
+                <label htmlFor="capacity" className="ep-label">Venue capacity</label>
+                <input id="capacity" type="number" min="1" className="ep-input font-mono text-[13px]" value={capacity} onChange={(e) => setCapacity(e.target.value)} {...field("capacity")} />
+                {err("capacity")}
+              </div>
+            </div>
+          </fieldset>
+
+          {/* Tickets */}
+          <fieldset className="grid min-w-0 grid-cols-1 gap-4 pt-8 md:grid-cols-[180px_minmax(0,1fr)]">
+            <legend className="sr-only">Ticket tiers</legend>
+            <div>
+              <h2 className="text-sm font-medium">Ticket tiers</h2>
+              <p className="mt-1 text-[12px] text-fg-muted">Price in rupees. Use 0 for free entry.</p>
+            </div>
+            <div className="space-y-3">
+              <div className="ep-panel overflow-x-auto">
+                <table className="ep-table min-w-[560px]">
+                  <thead>
+                    <tr>
+                      <th className="w-[34%]">Name</th>
+                      <th>Description</th>
+                      <th className="w-28">Price (₹)</th>
+                      <th className="w-24">Quantity</th>
+                      <th className="w-10"><span className="sr-only">Remove</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ticketTypes.map((tt, i) => (
+                      <tr key={i} className="hover:bg-transparent">
+                        <td>
+                          <input aria-label={`Tier ${i + 1} name`} className="ep-input h-8 text-[13px]" placeholder="e.g. Early bird" value={tt.name} onChange={(e) => updateTicket(i, "name", e.target.value)} />
+                        </td>
+                        <td>
+                          <input aria-label={`Tier ${i + 1} description`} className="ep-input h-8 text-[13px]" placeholder="Optional" value={tt.description} onChange={(e) => updateTicket(i, "description", e.target.value)} />
+                        </td>
+                        <td>
+                          <input aria-label={`Tier ${i + 1} price in rupees`} type="number" min="0" className="ep-input h-8 font-mono text-[13px]" value={tt.price} onChange={(e) => updateTicket(i, "price", e.target.value)} />
+                        </td>
+                        <td>
+                          <input aria-label={`Tier ${i + 1} quantity`} type="number" min="1" className="ep-input h-8 font-mono text-[13px]" value={tt.totalQuantity} onChange={(e) => updateTicket(i, "totalQuantity", e.target.value)} />
+                        </td>
+                        <td>
+                          <button
+                            type="button"
+                            onClick={() => removeTicket(i)}
+                            disabled={ticketTypes.length === 1}
+                            className="ep-btn-ghost ep-btn-icon h-8 hover:text-danger"
+                            aria-label={`Remove tier ${i + 1}`}
+                          >
+                            <Trash2 />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {errors.tickets && <p className="text-[12px] text-danger" role="alert">{errors.tickets}</p>}
+              <button type="button" onClick={addTicket} className="ep-btn-secondary ep-btn-sm">
+                <Plus /> Add tier
+              </button>
+            </div>
+          </fieldset>
         </div>
 
-        {/* Form Content Area */}
-        <div className="flex-1 w-full min-w-0">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={currentStep}
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: -20 }}
-              transition={{ duration: 0.3, ease: "easeInOut" }}
-              className="min-h-[400px]"
-            >
-              <div className="mb-8 border-b border-white/5 pb-4">
-                <h2 className="text-2xl font-extrabold text-white">{WIZARD_STEPS[currentStep].label}</h2>
-              </div>
-              
-              {currentStep === 0 && renderBasicInfo()}
-              {currentStep === 1 && renderBanner()}
-              {currentStep === 2 && renderVenue()}
-              {currentStep === 3 && renderTickets()}
-              {currentStep === 4 && renderReview()}
-            </motion.div>
-          </AnimatePresence>
-
-          {/* Footer Navigation */}
-          <div className="mt-12 pt-6 border-t border-white/5 flex items-center justify-between">
-            <button
-              onClick={prevStep}
-              disabled={currentStep === 0}
-              className="ep-btn-secondary px-5 py-2.5 flex items-center gap-2 disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <ChevronLeft className="h-4 w-4" /> Back
-            </button>
-
-            {currentStep < WIZARD_STEPS.length - 1 ? (
-              <button
-                onClick={nextStep}
-                className="ep-btn-primary px-8 py-2.5 flex items-center gap-2 shadow-[0_0_15px_rgba(124,58,237,0.3)]"
-              >
-                Continue <ChevronRight className="h-4 w-4" />
-              </button>
-            ) : (
-              <button
-                onClick={() => handleSubmit()}
-                disabled={loading}
-                className="ep-btn-primary px-8 py-2.5 flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 border-transparent shadow-[0_0_15px_rgba(16,185,129,0.3)]"
-              >
-                {loading ? "Publishing..." : "Publish Event Live"} <Send className="h-4 w-4 ml-1" />
-              </button>
+        {/* Summary */}
+        <aside className="lg:sticky lg:top-6">
+          <div className="ep-panel">
+            <div className="border-b border-border px-4 py-3">
+              <h2 className="text-sm font-medium">Summary</h2>
+            </div>
+            <dl className="divide-y divide-border text-[13px]">
+              {[
+                ["Title", title || <span className="text-fg-subtle">Not set</span>],
+                ["Starts", startsAt ? <span className="tabular">{formatSchedule(new Date(startsAt).toISOString())}</span> : <span className="text-fg-subtle">Not set</span>],
+                ["Venue", venue || <span className="text-fg-subtle">Not set</span>],
+                ["Tickets", <span key="t" className={cn("font-mono text-[12px]", overCapacity && "text-warning")}>{formatNumber(totalTickets)} / {formatNumber(parseInt(capacity) || 0)}</span>],
+                ["If sold out", <span key="p" className="font-mono text-[12px]">{formatAmount(potential)}</span>],
+              ].map(([k, v]) => (
+                <div key={k as string} className="flex justify-between gap-4 px-4 py-2">
+                  <dt className="shrink-0 text-fg-muted">{k}</dt>
+                  <dd className="min-w-0 truncate text-right">{v}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="border-t border-border px-4 py-3">
+              <p className="ep-overline mb-1.5">Tiers</p>
+              <ul className="space-y-1 text-[13px]">
+                {ticketTypes.map((t, i) => (
+                  <li key={i} className="flex justify-between gap-3">
+                    <span className="truncate">{t.name || <span className="text-fg-subtle">Unnamed</span>}</span>
+                    <span className="shrink-0 font-mono text-[12px] text-fg-muted">
+                      {formatPrice(Math.round(parseFloat(t.price || "0") * 100))} × {t.totalQuantity || 0}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {overCapacity && (
+              <p className="border-t border-border px-4 py-2.5 text-[12px] text-warning">Tiers add up to more tickets than the venue capacity.</p>
             )}
           </div>
-        </div>
 
+          {submitError && <Notice tone="danger" title="Couldn't create the event" className="mt-4">{submitError}</Notice>}
+
+          <div className="mt-4 grid gap-2">
+            <button type="submit" disabled={loading !== null} className="ep-btn-primary ep-btn-lg w-full">
+              {loading === "publish" ? "Publishing…" : "Create and publish"}
+            </button>
+            <button type="button" onClick={(e) => handleSubmit(e, false)} disabled={loading !== null} className="ep-btn-secondary ep-btn-lg w-full">
+              {loading === "draft" ? "Saving…" : "Save as draft"}
+            </button>
+            <button type="button" onClick={() => router.push("/dashboard")} className="ep-btn-ghost w-full">
+              Cancel
+            </button>
+          </div>
+        </aside>
       </div>
-    </div>
+    </form>
   );
 }
