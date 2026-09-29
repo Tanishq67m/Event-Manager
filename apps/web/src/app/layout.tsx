@@ -1,20 +1,17 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Bricolage_Grotesque, Geist, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import Navbar from "@/components/Navbar";
 
-const plexSans = IBM_Plex_Sans({
+const geist = Geist({ subsets: ["latin"], variable: "--font-geist", display: "swap" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap" });
+// Variable font with optical sizing, so large headlines get the tighter display cut.
+const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-plex-sans",
-  display: "swap",
-});
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-plex-mono",
+  axes: ["opsz"],
+  variable: "--font-bricolage",
   display: "swap",
 });
 
@@ -25,14 +22,14 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f7f7f5" },
-    { media: "(prefers-color-scheme: dark)", color: "#0e0f11" },
+    { media: "(prefers-color-scheme: light)", color: "#f5f4f0" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0c0f" },
   ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`}>
+    <html lang="en" className={`${geist.variable} ${geistMono.variable} ${bricolage.variable}`}>
       <body className="min-h-screen bg-bg font-sans text-fg antialiased">
         <AuthProvider>
           <Navbar />
@@ -40,7 +37,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <Toaster
             theme="system"
             position="bottom-right"
-            toastOptions={{ style: { borderRadius: 6, fontFamily: "var(--font-sans)", fontSize: 13 } }}
+            toastOptions={{ style: { borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 13 } }}
           />
         </AuthProvider>
       </body>

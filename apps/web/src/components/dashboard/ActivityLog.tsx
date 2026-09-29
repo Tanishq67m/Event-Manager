@@ -30,7 +30,7 @@ export function ActivityLog({ entries, showEvent = true }: { entries: ActivityEn
           key={e.id}
           className={cn(
             "grid grid-cols-[auto_auto_minmax(0,1fr)] items-baseline gap-x-3 px-3 py-2",
-            showEvent && "sm:grid-cols-[88px_72px_minmax(0,1fr)_minmax(0,1.2fr)]"
+            showEvent && "sm:grid-cols-[136px_80px_minmax(0,1fr)_minmax(0,1.2fr)]"
           )}
         >
           <time dateTime={e.at} className="whitespace-nowrap text-fg-subtle tabular" title={new Date(e.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}>

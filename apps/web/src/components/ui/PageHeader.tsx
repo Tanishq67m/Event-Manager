@@ -26,7 +26,7 @@ export function PageHeader({
             {back.label}
           </Link>
         )}
-        <h1 className="truncate text-xl font-semibold tracking-tight text-fg">{title}</h1>
+        <h1 className="ep-display truncate text-[30px] leading-tight text-fg sm:text-[34px]">{title}</h1>
         {description && <p className="mt-1 text-[13px] text-fg-muted">{description}</p>}
         {meta && <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-fg-muted">{meta}</div>}
       </div>

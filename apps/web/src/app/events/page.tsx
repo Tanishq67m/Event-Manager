@@ -75,33 +75,31 @@ function EventDiscovery({ initialQuery }: { initialQuery: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <header className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
+    <div className="mx-auto max-w-6xl px-4 py-12 sm:px-6">
+      <header className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Events</h1>
-          <p className="mt-1 text-[13px] text-fg-muted">
-            {loading ? "Loading…" : `${total} event${total === 1 ? "" : "s"}${query ? ` matching “${query}”` : ""}`}
-          </p>
+          <p className="ep-eyebrow">{loading ? "Loading" : `${total} event${total === 1 ? "" : "s"}${query ? ` matching “${query}”` : " on sale"}`}</p>
+          <h1 className="ep-display mt-4 text-[44px] sm:text-[60px]">Find your next night out.</h1>
         </div>
         <Link href={user ? "/dashboard/events/new" : "/auth/register?role=ORGANIZER"} className="ep-btn-secondary self-start sm:self-auto">
           Host an event
         </Link>
       </header>
 
-      <div className="mt-5 flex flex-col gap-3 md:flex-row md:items-center">
+      <div className="mt-8 flex flex-col gap-3 border-y border-border py-4 md:flex-row md:items-center">
         <form onSubmit={handleSearch} role="search" className="flex w-full gap-2 md:max-w-md">
           <div className="relative flex-1">
-            <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle" />
+            <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-fg-subtle" />
             <input
               type="search"
               aria-label="Search events"
-              className="ep-input pl-8"
+              className="ep-input h-11 rounded-xl pl-9 text-[15px]"
               placeholder="Search by name, venue or organizer"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <button type="submit" className="ep-btn-secondary h-9">Search</button>
+          <button type="submit" className="ep-btn-primary h-11 rounded-xl px-5">Search</button>
         </form>
 
         <div className="scrollbar-none -mx-4 flex gap-1 overflow-x-auto px-4 md:mx-0 md:ml-auto md:px-0" role="group" aria-label="Quick filters">
@@ -113,8 +111,8 @@ function EventDiscovery({ initialQuery }: { initialQuery: string }) {
                 onClick={() => handleCategoryClick(cat.id, cat.label)}
                 aria-pressed={isActive}
                 className={cn(
-                  "h-7 shrink-0 whitespace-nowrap rounded-md border px-2.5 text-[12px] font-medium transition-colors",
-                  isActive ? "border-fg bg-fg text-bg" : "border-border bg-surface text-fg-muted hover:text-fg"
+                  "h-9 shrink-0 whitespace-nowrap rounded-lg border px-3 text-[13px] font-medium transition-colors",
+                  isActive ? "border-primary bg-primary text-primary-fg" : "border-border bg-surface text-fg-muted hover:border-border-strong hover:text-fg"
                 )}
               >
                 {cat.label}
@@ -133,18 +131,18 @@ function EventDiscovery({ initialQuery }: { initialQuery: string }) {
         </div>
       )}
 
-      <div className="mt-6">
+      <div className="mt-8">
         {error ? (
           <Notice tone="danger" title="Couldn't load events">
             The events service didn&apos;t respond.{" "}
             <button onClick={() => load(page, query)} className="font-medium text-fg underline underline-offset-2">Retry</button>
           </Notice>
         ) : loading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-busy="true">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="overflow-hidden rounded-lg border border-border bg-surface">
-                <div className="ep-skeleton aspect-[2/1] rounded-none" />
-                <div className="space-y-2 p-3.5">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="overflow-hidden rounded-2xl border border-border bg-surface">
+                <div className="ep-skeleton aspect-[16/9] rounded-none" />
+                <div className="space-y-2 p-4">
                   <div className="ep-skeleton h-3 w-1/3" />
                   <div className="ep-skeleton h-4 w-3/4" />
                   <div className="ep-skeleton h-3 w-1/2" />
@@ -165,7 +163,7 @@ function EventDiscovery({ initialQuery }: { initialQuery: string }) {
             }
           />
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
             {data.map((event) => (
               <EventCard key={event.id} event={event} />
             ))}

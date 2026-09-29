@@ -23,6 +23,7 @@ export default function Navbar() {
 
   const links = [
     { href: "/events", label: "Events", show: true },
+    { href: "/#how", label: "How it works", show: !user },
     { href: "/my-tickets", label: "My tickets", show: !!user },
     { href: "/dashboard", label: "Dashboard", show: isOrganizer },
   ].filter((l) => l.show);
@@ -36,8 +37,8 @@ export default function Navbar() {
   }
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border bg-surface">
-      <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
+    <header className="sticky top-0 z-40 border-b border-border bg-bg/85 backdrop-blur-md supports-[backdrop-filter]:bg-bg/75">
+      <div className="mx-auto flex h-16 max-w-6xl items-center gap-8 px-4 sm:px-6">
         <Link href="/" className="rounded-sm" aria-label="EventPulse home">
           <Logo />
         </Link>
@@ -49,8 +50,8 @@ export default function Navbar() {
               href={l.href}
               aria-current={isActive(l.href) ? "page" : undefined}
               className={cn(
-                "rounded-md px-2.5 py-1.5 text-[13px] font-medium transition-colors",
-                isActive(l.href) ? "bg-surface-muted text-fg" : "text-fg-muted hover:text-fg"
+                "rounded-md px-3 py-2 text-[14px] font-medium transition-colors",
+                isActive(l.href) ? "text-fg" : "text-fg-muted hover:text-fg"
               )}
             >
               {l.label}
@@ -58,7 +59,7 @@ export default function Navbar() {
           ))}
         </nav>
 
-        <form onSubmit={onSearch} role="search" className="relative ml-auto hidden w-60 lg:block">
+        <form onSubmit={onSearch} role="search" className="relative ml-auto hidden w-56 lg:block">
           <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-subtle" />
           <input
             type="search"
@@ -66,7 +67,7 @@ export default function Navbar() {
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search events"
             aria-label="Search events"
-            className="ep-input h-8 pl-8 text-[13px]"
+            className="ep-input h-9 rounded-lg bg-surface pl-8 text-[13px]"
           />
         </form>
 
@@ -82,7 +83,7 @@ export default function Navbar() {
             </>
           ) : (
             <>
-              <Link href="/auth/login" className="ep-btn-ghost">
+              <Link href="/auth/login" className="ep-btn-secondary">
                 Sign in
               </Link>
               <Link href="/auth/register" className="ep-btn-primary">

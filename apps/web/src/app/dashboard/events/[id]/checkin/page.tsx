@@ -163,9 +163,9 @@ export default function CheckinPage() {
 
       {loadError && <Notice tone="danger" title="Couldn't load event stats">{loadError}</Notice>}
 
-      <div className="grid items-start gap-6 lg:grid-cols-12">
+      <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-12">
         {/* ── Scanner ─────────────────────────────────────────────── */}
-        <section aria-labelledby="scan-h" className="space-y-4 lg:col-span-5">
+        <section aria-labelledby="scan-h" className="min-w-0 space-y-4 lg:col-span-5">
           <div className="ep-panel">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <h2 id="scan-h" className="text-sm font-medium">Scan ticket</h2>
@@ -276,7 +276,7 @@ export default function CheckinPage() {
         </section>
 
         {/* ── Live stats ──────────────────────────────────────────── */}
-        <section aria-label="Event stats" className="space-y-6 lg:col-span-7">
+        <section aria-label="Event stats" className="min-w-0 space-y-6 lg:col-span-7">
           {!analytics && !loadError ? (
             <div className="space-y-4" aria-busy="true">
               <div className="ep-skeleton h-[74px]" />

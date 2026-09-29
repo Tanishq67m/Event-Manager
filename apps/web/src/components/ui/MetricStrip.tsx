@@ -14,7 +14,7 @@ export function MetricStrip({ metrics, className }: { metrics: Metric[]; classNa
   return (
     <dl
       className={cn(
-        "grid grid-cols-2 overflow-hidden rounded-lg border border-border bg-surface",
+        "grid grid-cols-2 overflow-hidden rounded-2xl border border-border bg-surface",
         metrics.length >= 4 ? "lg:grid-cols-4" : metrics.length === 3 ? "sm:grid-cols-3" : "",
         className
       )}
@@ -23,7 +23,7 @@ export function MetricStrip({ metrics, className }: { metrics: Metric[]; classNa
         <div
           key={m.label}
           className={cn(
-            "border-border px-4 py-3",
+            "border-border px-5 py-4",
             i % 2 === 1 && "border-l",
             i >= 2 && "border-t",
             metrics.length >= 4 && "lg:border-t-0",
@@ -33,7 +33,7 @@ export function MetricStrip({ metrics, className }: { metrics: Metric[]; classNa
           )}
         >
           <dt className="text-[12px] text-fg-muted">{m.label}</dt>
-          <dd className="mt-1 text-lg font-semibold tracking-tight text-fg tabular">{m.value}</dd>
+          <dd className="ep-display mt-1.5 text-[28px] leading-none text-fg tabular">{m.value}</dd>
           {m.detail && <dd className="mt-0.5 text-[12px] text-fg-subtle tabular">{m.detail}</dd>}
         </div>
       ))}
