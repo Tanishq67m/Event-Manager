@@ -13,6 +13,7 @@ import { Notice } from "@/components/ui/Notice";
 import { Status } from "@/components/ui/Status";
 import { DateBlock } from "@/components/ui/DateBlock";
 import { Countdown } from "@/components/ui/Countdown";
+import { cld, BANNER_HERO } from "@/lib/cloudinary";
 
 export default function EventDetailPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -129,7 +130,7 @@ export default function EventDetailPage() {
 
           {event.bannerUrl && (
             <div className="mt-6 aspect-[21/9] overflow-hidden rounded-2xl border border-border bg-surface-muted">
-              <img src={event.bannerUrl} alt="" className="h-full w-full object-cover" />
+              <img src={cld(event.bannerUrl, BANNER_HERO)} alt={`${event.title} cover`} className="h-full w-full object-cover" />
             </div>
           )}
 

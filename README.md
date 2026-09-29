@@ -77,7 +77,11 @@ FRONTEND_URL=http://localhost:3000
 RAZORPAY_KEY_ID="rzp_test_xxxx"
 RAZORPAY_KEY_SECRET="xxxx"
 RESEND_API_KEY="re_xxxx"
-CLOUDINARY_CLOUD_NAME="xxxx"
+
+# Event cover images (cloudinary.com → Settings → API Keys)
+CLOUDINARY_CLOUD_NAME="your-cloud-name"
+CLOUDINARY_API_KEY="xxxx"
+CLOUDINARY_API_SECRET="xxxx"
 ```
 
 #### Frontend (`apps/web/.env.local`)

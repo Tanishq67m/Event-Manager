@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, Download, Plus, ScanLine } from "lucide-react";
+import { ArrowDown, ArrowUp, Download, ImageIcon, Plus, ScanLine } from "lucide-react";
 import { toast } from "sonner";
 import { events, bookings, checkin, organizations, ApiError, Event, EventBooking } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -15,6 +15,7 @@ import { Notice } from "@/components/ui/Notice";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { DailyBarChart, DayPoint } from "@/components/dashboard/DailyBarChart";
 import { ActivityLog, ActivityEntry } from "@/components/dashboard/ActivityLog";
+import { CoverDialog } from "@/components/dashboard/CoverDialog";
 
 type Filter = "all" | "upcoming" | "draft" | "past";
 type SortKey = "date" | "title" | "sold" | "revenue";
@@ -32,6 +33,7 @@ export default function DashboardPage() {
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "date", dir: "asc" });
   const [publishing, setPublishing] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
+  const [coverFor, setCoverFor] = useState<Event | null>(null);
   const [orgName, setOrgName] = useState<string | null>(null);
   // Reference time for "upcoming", "starts in" and the 14-day window; refreshed on each load.
   const [now, setNow] = useState(() => Date.now());
@@ -335,7 +337,7 @@ export default function DashboardPage() {
                             <td className="num font-mono text-[12px] text-fg-muted">{e.status === "DRAFT" ? "—" : `${p.checkedIn}/${p.bookings}`}</td>
                             <td className="num font-mono text-[12px]">{e.status === "DRAFT" ? "—" : formatAmount(p.revenue)}</td>
                             <td>
-                              <RowActions e={e} publishing={publishing} exporting={exporting} onPublish={publish} onExport={exportCsv} />
+                              <RowActions e={e} publishing={publishing} exporting={exporting} onPublish={publish} onExport={exportCsv} onCover={setCoverFor} />
                             </td>
                           </tr>
                         );
@@ -362,7 +364,7 @@ export default function DashboardPage() {
                           <span className="font-mono text-[12px] text-fg-muted">{p.sold}/{p.total}</span>
                           {e.status !== "DRAFT" && <span className="font-mono text-[12px]">{formatAmount(p.revenue)}</span>}
                         </div>
-                        <RowActions e={e} publishing={publishing} exporting={exporting} onPublish={publish} onExport={exportCsv} mobile />
+                        <RowActions e={e} publishing={publishing} exporting={exporting} onPublish={publish} onExport={exportCsv} onCover={setCoverFor} mobile />
                       </li>
                     );
                   })}
@@ -386,6 +388,16 @@ export default function DashboardPage() {
           </section>
         </>
       )}
+      {coverFor && (
+        <CoverDialog
+          event={coverFor}
+          onClose={() => setCoverFor(null)}
+          onSaved={(bannerUrl) => {
+            setData((prev) => prev.map((x) => (x.id === coverFor.id ? { ...x, bannerUrl } : x)));
+            setCoverFor((c) => (c ? { ...c, bannerUrl } : c));
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -396,6 +408,7 @@ function RowActions({
   exporting,
   onPublish,
   onExport,
+  onCover,
   mobile,
 }: {
   e: Event;
@@ -403,6 +416,7 @@ function RowActions({
   exporting: string | null;
   onPublish: (e: Event) => void;
   onExport: (e: Event) => void;
+  onCover: (e: Event) => void;
   mobile?: boolean;
 }) {
   return (
@@ -417,6 +431,15 @@ function RowActions({
           <ScanLine /> Check-in
         </Link>
       )}
+      <button
+        onClick={() => onCover(e)}
+        className="ep-btn-ghost ep-btn-sm"
+        aria-label={`${e.bannerUrl ? "Change" : "Add"} cover image for ${e.title}`}
+        title={e.bannerUrl ? "Change cover image" : "Add cover image"}
+      >
+        <ImageIcon />
+        {mobile && "Cover"}
+      </button>
       <button
         onClick={() => onExport(e)}
         disabled={exporting === e.id}

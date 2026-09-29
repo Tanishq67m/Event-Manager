@@ -231,7 +231,7 @@ export const events = {
   byId: (id: string) => request<Event>(`/events/manage/${id}`),
 
   create: (body: {
-    title: string; description: string; venue: string;
+    title: string; description: string; venue: string; bannerUrl?: string;
     capacity: number; startsAt: string; endsAt: string;
     ticketTypes: Array<{ name: string; description?: string; price: number; totalQuantity: number }>;
   }) => request<Event>("/events", { method: "POST", body: JSON.stringify(body) }),
@@ -244,6 +244,44 @@ export const events = {
 
   delete: (id: string) =>
     request<null>(`/events/manage/${id}`, { method: "DELETE" }),
+};
+
+// ── Image uploads (Cloudinary) ─────────────────────────────────────────────────
+
+export const uploads = {
+  /** Signed parameters for uploading one banner straight from the browser to Cloudinary. */
+  bannerSignature: () =>
+    request<{ cloudName: string; apiKey: string; folder: string; allowedFormats: string; timestamp: number; signature: string }>(
+      "/uploads/banner-signature", { method: "POST" }
+    ),
+
+  /** Upload an image file to Cloudinary and resolve with its https URL. Reports progress 0–100. */
+  uploadBanner: async (file: File, onProgress?: (pct: number) => void): Promise<string> => {
+    const sig = await uploads.bannerSignature();
+    const form = new FormData();
+    form.append("file", file);
+    form.append("api_key", sig.apiKey);
+    form.append("timestamp", String(sig.timestamp));
+    form.append("signature", sig.signature);
+    form.append("folder", sig.folder);
+    form.append("allowed_formats", sig.allowedFormats);
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `https://api.cloudinary.com/v1_1/${sig.cloudName}/image/upload`);
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => {
+        let body: { secure_url?: string; error?: { message?: string } } = {};
+        try { body = JSON.parse(xhr.responseText); } catch { /* keep empty */ }
+        if (xhr.status >= 200 && xhr.status < 300 && body.secure_url) resolve(body.secure_url);
+        else reject(new ApiError(xhr.status, body.error?.message || "Upload failed"));
+      };
+      xhr.onerror = () => reject(new ApiError(0, "Upload failed — check your connection"));
+      xhr.send(form);
+    });
+  },
 };
 
 // ── Organizations ──────────────────────────────────────────────────────────────

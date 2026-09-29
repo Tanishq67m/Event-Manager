@@ -13,6 +13,7 @@ import eventRoutes from "./modules/events/events.routes";
 import bookingRoutes from "./modules/bookings/bookings.routes";
 import paymentRoutes from "./modules/payments/payments.routes";
 import checkinRoutes from "./modules/checkin/checkin.routes";
+import uploadRoutes from "./modules/uploads/uploads.routes";
 
 const app = express();
 
@@ -60,6 +61,7 @@ app.use("/api/events", eventRoutes);
 app.use("/api/bookings", bookingRoutes);
 app.use("/api/payments", paymentRoutes);
 app.use("/api/checkin", checkinRoutes);
+app.use("/api/uploads", uploadRoutes);
 
 // ── 404 ────────────────────────────────────────────────────────────────────────
 app.use((_req, res) => {

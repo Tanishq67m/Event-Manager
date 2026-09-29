@@ -3,6 +3,7 @@ import { ArrowUpRight, Clock, MapPin } from "lucide-react";
 import { Event } from "@/lib/api";
 import { cn, formatAmount, formatPrice } from "@/lib/utils";
 import { DateBlock } from "@/components/ui/DateBlock";
+import { cld, BANNER_CARD } from "@/lib/cloudinary";
 
 const time = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" });
@@ -34,7 +35,10 @@ export default function EventCard({ event }: { event: Event }) {
       {/* Poster */}
       <div className={cn("relative aspect-[16/9] overflow-hidden border-b border-border", !event.bannerUrl && poster.box)}>
         {event.bannerUrl ? (
-          <img src={event.bannerUrl} alt="" className="h-full w-full object-cover" />
+          <>
+            <img src={cld(event.bannerUrl, BANNER_CARD)} alt="" loading="lazy" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.03]" />
+            <DateBlock iso={event.startsAt} className="absolute bottom-4 left-4 text-fg" />
+          </>
         ) : (
           <>
             <DateBlock iso={event.startsAt} className="absolute bottom-4 left-4 text-fg" />

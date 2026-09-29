@@ -2,6 +2,7 @@ import { prisma } from "../../prisma/client";
 import { uniqueSlug } from "../../utils/slug";
 import { NotFoundError, ForbiddenError, ValidationError } from "../../utils/AppError";
 import { CreateEventInput, UpdateEventInput, ListEventsInput } from "./events.schema";
+import { assertBannerUrl } from "../uploads/uploads.service";
 
 // ── Public ────────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ export async function createEvent(userId: string, input: CreateEventInput) {
     });
   }
 
+  assertBannerUrl(input.bannerUrl);
   const slug = uniqueSlug(input.title);
 
   const event = await prisma.event.create({
@@ -83,6 +85,7 @@ export async function createEvent(userId: string, input: CreateEventInput) {
       slug,
       description: input.description,
       venue: input.venue,
+      bannerUrl: input.bannerUrl ?? null,
       capacity: input.capacity,
       startsAt: new Date(input.startsAt),
       endsAt: new Date(input.endsAt),
@@ -163,12 +166,15 @@ export async function updateEvent(userId: string, eventId: string, input: Update
     throw new ValidationError("Cannot edit a cancelled event");
   }
 
+  assertBannerUrl(input.bannerUrl);
+
   return prisma.event.update({
     where: { id: eventId },
     data: {
       ...(input.title ? { title: input.title } : {}),
       ...(input.description ? { description: input.description } : {}),
       ...(input.venue ? { venue: input.venue } : {}),
+      ...(input.bannerUrl !== undefined ? { bannerUrl: input.bannerUrl } : {}),
       ...(input.capacity ? { capacity: input.capacity } : {}),
       ...(input.startsAt ? { startsAt: new Date(input.startsAt) } : {}),
       ...(input.endsAt ? { endsAt: new Date(input.endsAt) } : {}),

@@ -13,6 +13,7 @@ export const createEventSchema = z.object({
   title: z.string().min(3, "Title must be at least 3 characters").max(200),
   description: z.string().min(10, "Description must be at least 10 characters"),
   venue: z.string().min(3, "Venue is required").max(300),
+  bannerUrl: z.string().url("Invalid banner URL").max(500).optional(),
   capacity: z.number().int().min(1, "Capacity must be at least 1"),
   startsAt: z.string().datetime("Invalid start date"),
   endsAt: z.string().datetime("Invalid end date"),
@@ -28,6 +29,7 @@ export const updateEventSchema = z.object({
   title: z.string().min(3).max(200).optional(),
   description: z.string().min(10).optional(),
   venue: z.string().min(3).max(300).optional(),
+  bannerUrl: z.string().url().max(500).nullable().optional(), // null removes the banner
   capacity: z.number().int().min(1).optional(),
   startsAt: z.string().datetime().optional(),
   endsAt: z.string().datetime().optional(),

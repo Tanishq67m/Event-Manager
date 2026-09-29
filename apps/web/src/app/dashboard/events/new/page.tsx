@@ -9,6 +9,7 @@ import { useAuth } from "@/lib/auth-context";
 import { cn, formatAmount, formatNumber, formatPrice, formatSchedule } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Notice } from "@/components/ui/Notice";
+import { ImageUpload } from "@/components/ImageUpload";
 
 interface TicketTypeInput {
   name: string;
@@ -46,6 +47,8 @@ export default function NewEventPage() {
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [capacity, setCapacity] = useState("100");
+  const [bannerUrl, setBannerUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [ticketTypes, setTicketTypes] = useState<TicketTypeInput[]>([
     { name: "General Admission", description: "Standard pass", price: "0", totalQuantity: "100" },
   ]);
@@ -82,6 +85,7 @@ export default function NewEventPage() {
         title: title || "Untitled Event",
         description,
         venue,
+        bannerUrl: bannerUrl ?? undefined,
         capacity: parseInt(capacity),
         startsAt: startsAt ? new Date(startsAt).toISOString() : new Date().toISOString(),
         endsAt: endsAt ? new Date(endsAt).toISOString() : new Date(Date.now() + 7200000).toISOString(),
@@ -153,6 +157,18 @@ export default function NewEventPage() {
                 />
                 {err("description") || <p className="ep-hint">Line breaks are kept as written.</p>}
               </div>
+            </div>
+          </fieldset>
+
+          {/* Cover image */}
+          <fieldset className="grid min-w-0 grid-cols-1 gap-4 py-8 md:grid-cols-[180px_minmax(0,1fr)]">
+            <legend className="sr-only">Cover image</legend>
+            <div>
+              <h2 className="text-sm font-medium">Cover image</h2>
+              <p className="mt-1 text-[12px] text-fg-muted">Optional. Without one, the card shows the date on a coloured poster.</p>
+            </div>
+            <div className="max-w-xl">
+              <ImageUpload value={bannerUrl} onChange={setBannerUrl} onUploadingChange={setUploading} disabled={loading !== null} />
             </div>
           </fieldset>
 
@@ -288,10 +304,10 @@ export default function NewEventPage() {
           {submitError && <Notice tone="danger" title="Couldn't create the event" className="mt-4">{submitError}</Notice>}
 
           <div className="mt-4 grid gap-2">
-            <button type="submit" disabled={loading !== null} className="ep-btn-primary ep-btn-lg w-full">
+            <button type="submit" disabled={loading !== null || uploading} className="ep-btn-primary ep-btn-lg w-full">
               {loading === "publish" ? "Publishing…" : "Create and publish"}
             </button>
-            <button type="button" onClick={(e) => handleSubmit(e, false)} disabled={loading !== null} className="ep-btn-secondary ep-btn-lg w-full">
+            <button type="button" onClick={(e) => handleSubmit(e, false)} disabled={loading !== null || uploading} className="ep-btn-secondary ep-btn-lg w-full">
               {loading === "draft" ? "Saving…" : "Save as draft"}
             </button>
             <button type="button" onClick={() => router.push("/dashboard")} className="ep-btn-ghost w-full">
